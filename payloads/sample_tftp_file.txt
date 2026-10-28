@@ -1,0 +1,60 @@
+﻿# ============================================================
+# IoT Device Configuration File - TFTP Test Payload
+# File: payloads/sample_tftp_file.txt
+# Size target: >1024 bytes (forces multiple 512-byte TFTP blocks)
+# ============================================================
+
+[device]
+device_id = sim_device_001
+firmware_version = 3.2.1
+hardware_revision = B
+serial_number = SN-2026-TEST-001
+
+[network]
+server_host = 127.0.0.1
+server_port = 8080
+protocol = HTTP
+keepalive_interval = 60
+reconnect_delay = 5
+
+[sensors]
+temperature.enabled = true
+temperature.unit = celsius
+temperature.min_alert = -10.0
+temperature.max_alert = 85.0
+humidity.enabled = true
+humidity.unit = percent
+humidity.min_alert = 5.0
+humidity.max_alert = 95.0
+
+[telemetry]
+report_interval_sec = 30
+batch_size = 10
+qos_level = 1
+topic_prefix = v1/devices/me/telemetry
+
+[security]
+tls_enabled = false
+auth_token = test_token_tftp_device_001
+cert_path = /etc/iot/certs/device.pem
+
+[calibration_data]
+# Factory calibration offsets stored during manufacturing
+temp_offset_raw = 0.15
+temp_scale_factor = 1.002
+humidity_offset_raw = -0.8
+humidity_scale_factor = 0.998
+
+[ota_update]
+ota_server_url = http://ota.iot.local/firmware
+current_checksum = sha256:abc123def456
+auto_update = true
+update_window_start = 02:00
+update_window_end = 04:00
+
+[logging]
+log_level = INFO
+log_file = /var/log/iot_device.log
+max_log_size_kb = 512
+rotation_count = 3
+

@@ -1,0 +1,26 @@
+﻿# ============================================================
+# IoT Protocol Test Harness - Python Dependencies
+# Covers 9 Group A protocols + test runner utilities
+# Generated: 2026-10-27
+# Environment: Windows / Python 3.14
+# ============================================================
+
+# --- Test Runner & Utilities ---
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pyyaml>=6.0.1
+
+# --- Protocol Simulators (Group A) ---
+requests>=2.31.0          # Protocol #1:  HTTP
+paho-mqtt>=2.0.0          # Protocol #2:  MQTT
+aiocoap>=0.4.7            # Protocol #3:  CoAP (asyncio-based)
+slixmpp>=1.8.5            # Protocol #4:  XMPP
+pika>=1.3.2               # Protocol #5:  AMQP 0-9-1
+cyclonedds>=0.10.5        # Protocol #6:  DDS (Eclipse Cyclone DDS, includes pre-built C-library wheels)
+websockets>=12.0          # Protocol #9:  WebSocket
+tftpy>=0.8.2              # Protocol #11: TFTP
+
+# --- Note ---
+# Protocol #7  (LwM2M):   Uses leshan-client-demo.jar (bin/) -- no pip package needed
+# Protocol #8  (LoRaWAN): Uses lorawan_udp_forwarder.py (pure Python socket) -- no pip package needed
+# Protocol #10 (TCP/UDP): Uses Python standard library 'socket' -- no pip package needed

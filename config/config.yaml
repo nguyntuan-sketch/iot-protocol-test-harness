@@ -1,0 +1,175 @@
+# ===========================================================
+# IoT Protocol Test Harness - Central Configuration
+# File: config/config.yaml
+# Description: Unified connection parameters for all 11 adapters
+# ===========================================================
+
+global:
+  target_host: "127.0.0.1"
+  timeout_sec: 5
+  device_id: "sim_device_001"
+  telemetry_payload:
+    temperature: 26.5
+    humidity: 65.0
+    status: "OK"
+
+# ─── Verification & E2E Validation ──────────────────────────
+verification:
+  # REST API endpoint on IoT Platform to verify telemetry was received & stored
+  platform_api_url: "http://127.0.0.1:8080/api/plugins/telemetry/DEVICE/{device_id}/values/timeseries" # TODO: xác nhận với tài liệu API của platform
+  platform_api_token: "platform_admin_api_token_here" # TODO: cung cấp token xác thực REST của platform
+  query_timeout_sec: 10
+  retry_interval_sec: 2
+  max_retries: 3
+
+# ─── Seed Requirements Summary ──────────────────────────────
+seed_requirements:
+  device_id: "sim_device_001"
+  http_token: "test_token_http"
+  coap_token: "test_token_coap"
+  xmpp_client_jid: "sim_device_001@iot.local"
+  xmpp_adapter_jid: "adapter@iot.local"
+  amqp_exchange: "iot.telemetry"
+  amqp_queue: "iot.telemetry.queue"
+  amqp_routing_key: "device.telemetry"
+  dds_domain_id: 0
+  dds_topic: "IoTTelemetryTopic"
+  lwm2m_endpoint: "lwm2m_sim_device_001"
+  lorawan_dev_addr: "00000001"
+  lorawan_gw_eui: "AA555A0000000101"
+
+# ─── TLS / DTLS Configuration ───────────────────────────────
+tls:
+  enabled: false # TODO: bật khi test môi trường bảo mật TLS/DTLS
+  ca_cert_path: "" # TODO: đường dẫn root CA certificate (.crt/.pem)
+  client_cert_path: "" # TODO: đường dẫn client certificate (.crt)
+  client_key_path: "" # TODO: đường dẫn client private key (.key)
+  insecure_skip_verify: true # Cho phép self-signed cert trong môi trường test
+  ports:
+    https: 8443
+    mqtt_tls: 8883
+    coap_dtls: 5684
+    lwm2m_dtls: 5684
+    xmpp_tls: 5223
+    amqp_tls: 5671
+
+# ─── Negative Test Cases Declaration ────────────────────────
+negative_cases:
+  invalid_token: "INVALID_TOKEN_TEST_XYZ"
+  invalid_password: "WRONG_PASSWORD_XYZ"
+  malformed_json_payload: "{\"temperature\": 25, \"humidity\": }" # Missing value
+  out_of_range_payload:
+    temperature: 999999.0
+    humidity: -50.0
+  unauthorized_topic: "v1/devices/unauthorized_device_999/telemetry"
+  unregistered_lwm2m_endpoint: "unregistered_device_999"
+  invalid_lorawan_data: "AAAAAAAAAAAAAAAAAAAA" # Invalid MIC / payload
+
+# ─── 11 Protocol Adapters Configuration ─────────────────────
+adapters:
+  # ─── Protocol #1: HTTP (Item A4) ──────────────────────────
+  http:
+    port: 8080
+    auth_mode: "header" # Options: header | url_token -- TODO: xác nhận với tài liệu API của platform
+    access_token: "test_token_http"
+    path: "/api/v1/telemetry"
+    path_template: "/api/v1/{token}/telemetry" # TODO: dùng khi auth_mode = url_token
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+      X-Authorization: "Bearer test_token_http" # TODO: xác nhận header key (Authorization vs X-Authorization)
+
+  # ─── Protocol #2: MQTT (Item A6) ──────────────────────────
+  mqtt:
+    port: 1883
+    port_tls: 8883
+    topic: "v1/devices/me/telemetry"
+    username: "sim_device_001"
+    password: "secret"
+    qos: 1
+    keepalive: 60
+    client_id: "iot_test_client_001"
+    # Note (Item A6): Từ paho-mqtt >= 2.0.0 bắt buộc dùng:
+    # mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=...)
+
+  # ─── Protocol #3: CoAP (Item A4, B3) ──────────────────────
+  coap:
+    port: 5683 # Shared default with LwM2M -- TODO: xác nhận nếu platform tách cổng riêng
+    auth_mode: "url_token" # Options: url_token | query_param | header -- TODO: xác nhận với platform
+    access_token: "test_token_coap"
+    path: "api/v1/telemetry"
+    path_template: "api/v1/{token}/telemetry"
+    message_type: "CON" # Confirmable (expects ACK)
+
+  # ─── Protocol #4: XMPP ────────────────────────────────────
+  xmpp:
+    port: 5222
+    client_jid: "sim_device_001@iot.local"
+    client_password: "secret"
+    target_adapter_jid: "adapter@iot.local"
+    message_type: "chat"
+
+  # ─── Protocol #5: AMQP ────────────────────────────────────
+  amqp:
+    port: 5672
+    vhost: "/"
+    username: "guest"
+    password: "guest"
+    exchange: "iot.telemetry"
+    exchange_type: "direct"
+    routing_key: "device.telemetry"
+    queue: "iot.telemetry.queue"
+    confirm_delivery: true
+
+  # ─── Protocol #6: DDS (Item A5) ───────────────────────────
+  dds:
+    domain_id: 0
+    topic_name: "IoTTelemetryTopic"
+    idl_file: "payloads/telemetry_schema.idl"
+    struct_name: "Telemetry"
+    # Note: Python binding dùng IdlStruct (int64 timestamp), file .idl dùng cho idlc
+
+  # ─── Protocol #7: LwM2M (Group B - Java JAR) (Item B2, B3) 
+  lwm2m:
+    port: 5683 # TODO: xác nhận nếu platform tách cổng riêng (ví dụ 5685)
+    server_uri: "coap://127.0.0.1:5683"
+    endpoint_name: "lwm2m_sim_device_001"
+    lifetime_sec: 60
+    jar_path: "bin/leshan-client-demo.jar"
+    objects:
+      - id: 3 # OMA IPSO Object: Device
+      - id: 3303 # OMA IPSO Object: Temperature Sensor
+    # Note (Item B2): Khảo sát thực tế mã nguồn Leshan 2.0.0-M17 cho thấy log thành công là:
+    success_pattern: "Registered with location"
+
+  # ─── Protocol #8: LoRaWAN (Group B - Pure Python) (Item A1) 
+  lorawan:
+    port: 1700
+    gateway_eui: "AA555A0000000101"
+    forwarder_script: "lorawan_udp_forwarder.py"
+    push_data_payload_file: "payloads/lorawan_push_data.json"
+    semtech_protocol_version: 2 # Byte 0: Protocol Version = 0x02
+    push_data_identifier: "0x00" # Byte 3: Identifier = 0x00 (PUSH_DATA) - Fixed from 0x02
+    push_ack_identifier: "0x01" # Byte 3: Identifier = 0x01 (PUSH_ACK response)
+
+  # ─── Protocol #9: WebSocket (Item B3) ─────────────────────
+  websocket:
+    port: 8080 # Shared default with HTTP -- TODO: xác nhận nếu platform dùng cổng riêng (ví dụ 8084)
+    path: "/ws/telemetry"
+    ping_interval: 20
+    ping_timeout: 10
+
+  # ─── Protocol #10: TCP/UDP Raw Socket ─────────────────────
+  tcp_udp:
+    tcp_port: 9000
+    udp_port: 9001
+    buffer_size: 4096
+    tcp_encoding: "utf-8"
+
+  # ─── Protocol #11: TFTP ───────────────────────────────────
+  tftp:
+    port: 69
+    remote_filename: "device_config_test.txt"
+    local_upload_file: "payloads/sample_tftp_file.txt"
+    block_size: 512
+    timeout_sec: 10

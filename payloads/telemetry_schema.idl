@@ -1,0 +1,53 @@
+// =============================================================
+// DDS IDL Schema Definition for IoT Protocol Test Harness
+// File: payloads/telemetry_schema.idl
+// Protocol: #6 DDS (Eclipse Cyclone DDS)
+// Standard: OMG IDL 4.2 / DDS-XTYPES 1.3
+//
+// NOTE ON USAGE (Item A5):
+// 1. File IDL này dùng để THAM CHIẾU chuẩn cấu trúc dữ liệu và
+//    dùng cho công cụ `idlc` khi sinh mã C/C++/Java adapter.
+// 2. Python binding của CycloneDDS (cyclonedds.idl) sử dụng dataclass
+//    kế thừa `IdlStruct` thay vì đọc trực tiếp file .idl tại runtime.
+// 3. Khai báo tương ứng trong Python:
+//      @dataclass
+//      class Telemetry(IdlStruct, typename="IoT.Telemetry"):
+//          device_id: types.string
+//          temperature: types.float64
+//          humidity: types.float64
+//          timestamp: types.int64     # 64-bit int (tránh lỗi tràn Y2038)
+//          status: types.string
+// =============================================================
+
+// --- Module namespace ---
+module IoT {
+
+    // Primary telemetry data structure published to DDS Topic "IoTTelemetryTopic"
+    @topic
+    struct Telemetry {
+        // Device identifier - acts as the DDS key
+        @key
+        string device_id;
+
+        // Environmental sensor readings
+        double temperature;      // Unit: Celsius (°C)
+        double humidity;         // Unit: % Relative Humidity
+
+        // Unix timestamp in milliseconds (UTC) - 64-bit int64 to prevent Y2038 overflow
+        long long timestamp;
+
+        // Optional status field
+        string status;
+    };
+
+    // Extended sensor data for multi-sensor devices
+    @topic
+    struct SensorArray {
+        @key
+        string device_id;
+        long   sensor_count;
+        sequence<double> readings;
+        long long timestamp;
+    };
+
+};

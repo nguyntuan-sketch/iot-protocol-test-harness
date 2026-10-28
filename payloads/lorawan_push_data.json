@@ -1,0 +1,37 @@
+﻿{
+  "_comment": "Semtech UDP Packet Forwarder Protocol v2 - PUSH_DATA Template",
+  "_protocol_ref": "https://github.com/Lora-net/packet_forwarder/blob/master/PROTOCOL.TXT",
+  "_header_note": "12-byte binary header: [0x02, Token_MSB, Token_LSB, 0x00, GW_EUI_8_bytes]. Prepended in lorawan_udp_forwarder.py",
+  "semtech_header": {
+    "version": "0x02",
+    "random_token_msb": "0xAB",
+    "random_token_lsb": "0xCD",
+    "identifier": "0x00",
+    "gateway_eui": "AA-55-5A-00-00-00-01-01"
+  },
+  "rxpk": [
+    {
+      "tmst": 1000000,
+      "chan": 0,
+      "rfch": 0,
+      "freq": 868.1,
+      "stat": 1,
+      "modu": "LORA",
+      "datr": "SF7BW125",
+      "codr": "4/5",
+      "rssi": -65,
+      "lsnr": 9.5,
+      "size": 23,
+      "data": "gAEAAACAAAAABBEPAQIDBAUGBwgJCgsMDQ==",
+      "_data_note": "Base64-encoded LoRaWAN MAC frame (unconfirmed uplink, FPort=1, FRMPayload=0x0102030405060708090A0B0C0D)",
+      "lorawan_frame_breakdown": {
+        "mhdr": "0x40",
+        "dev_addr": "00000001",
+        "fhdr_fctrl": "0x80",
+        "fcnt": 0,
+        "fport": 1,
+        "frm_payload_hex": "0102030405060708090A0B0C0D"
+      }
+    }
+  ]
+}

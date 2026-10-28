@@ -1,0 +1,47 @@
+# ===========================================================
+# IoT Protocol Simulators - Execution Plan & Grouping Registry
+# File: config/run_plan.yaml
+# Description: Defines execution groups, timeout grace, and sequence
+# ===========================================================
+
+execution:
+  default_mode: "connect"
+  default_timeout_sec: 5.0
+  connect_min_timeout_sec: 3.0
+  sequential: true # Bản đầu chạy tuần tự; sẵn sàng cho mở rộng tương lai
+
+groups:
+  # Nhóm port 8080: dịch vụ Web/HTTP và WebSocket
+  port8080:
+    description: "HTTP and WebSocket endpoints (port 8080)"
+    protocols: ["http", "websocket"]
+    notes: "Advisory check for port 8080"
+
+  # Nhóm UDP port 5683: CoAP và LwM2M
+  udp5683:
+    description: "CoAP and LwM2M UDP endpoints (shared port 5683 default)"
+    protocols: ["coap", "lwm2m"]
+    lwm2m_grace_sec: 15.0
+
+  # Nhóm Multicast Discovery: DDS
+  multicast:
+    description: "CycloneDDS Domain Participant Discovery"
+    protocols: ["dds"]
+    notes: "No host/port flags; uses domain discovery"
+
+  # Các giao thức cổng độc lập
+  port1883:
+    protocols: ["mqtt"]
+  port5222:
+    protocols: ["xmpp"]
+  port5672:
+    protocols: ["amqp"]
+  port1700:
+    protocols: ["lorawan"]
+  port9000:
+    protocols: ["tcp"]
+  port9001:
+    protocols: ["udp"]
+  port69:
+    protocols: ["tftp"]
+    notes: "Requires --allow-write flag in send/both mode"

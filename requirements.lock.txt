@@ -1,0 +1,38 @@
+# IoT Protocol Test Harness - Pinned Dependencies
+# Environment: conda env iot-test (Python 3.12.16 win-64)
+# Generated: 2026-10-27
+
+aiocoap==0.4.17
+aiodns==4.0.4
+certifi==2026.10.23
+cffi==2.1.1
+charset-normalizer==3.5.2
+click==8.5.0
+colorama==0.4.6
+cyclonedds==11.0.1
+idna==3.20
+iniconfig==2.3.1
+markdown-it-py==4.2.0
+mdurl==0.1.2
+packaging==26.3
+paho-mqtt==2.1.0
+pika==1.4.4
+pluggy==1.7.0
+pyasn1==0.6.4
+pyasn1_modules==0.4.2
+pycares==5.2.1
+pycparser==3.12
+Pygments==2.21.0
+pytest==9.1.1
+pytest-asyncio==1.4.1
+PyYAML==6.0.3
+requests==2.34.2
+rich==15.0.0
+rich-click==1.9.9
+setuptools==84.0.0
+slixmpp==1.17.0
+tftpy==0.8.7
+typing_extensions==4.16.0
+urllib3==2.8.0
+websockets==17.3
+wheel==0.48.0
