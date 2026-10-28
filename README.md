@@ -46,7 +46,7 @@ Bảng đối chiếu thông số mặc định từ mã nguồn và cấu hình
   * *Lưu ý môi trường Linux/macOS:* Đánh dấu (chưa kiểm chứng). Cơ chế dọn dẹp tiến trình con trong [runner/execute.py](runner/execute.py) hiện tại sử dụng Windows Job Object (`JOBOBJECT_EXTENDED_LIMIT_INFORMATION` với cờ `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) và lệnh `taskkill /T /F`. Khi chạy trên Linux/macOS, người dùng cần điều chỉnh sang quản lý Process Group (`os.killpg`).
 - **Python:** Yêu cầu Python phiên bản 3.10 đến 3.12 (đã kiểm chứng thực tế trên Python 3.12.16 trong môi trường Conda `iot-test`).
 - **Java (cho giao thức LwM2M):** Yêu cầu Java Development Kit (JDK) phiên bản 17 trở lên (đã kiểm chứng trên Oracle OpenJDK 22).
-  * *Cảnh báo quan trọng về Java trên Windows:* Tuyệt đối tránh dùng đường dẫn shim mặc định của Oracle (`C:\Program Files\Common Files\Oracle\Java\javapath\java.exe`). Binary shim này khởi chạy một tiến trình con trung gian nhưng không quản lý vòng đời, dễ dẫn đến hiện tượng sót tiến trình `java.exe` nền mồ côi. Hãy cài JDK chính thức và trỏ biến môi trường `JAVA_HOME` trực tiếp vào thư mục cài đặt JDK thật.
+  * *Cảnh báo quan trọng về Java trên Windows:* Tuyệt đối tránh dùng đường dẫn shim mặc định của Oracle (`C:\Program Files\Common Files\Oracle\Java\javapath\java.exe`). Binary shim này khởi chạy một tiến trình con trung gian nhưng không quản lý vòng đời, dễ dẫn đến hiện tượng sót tiến trình `java.exe` nền mồ côi. Cần cài đặt JDK chính thức và trỏ biến môi trường `JAVA_HOME` trực tiếp vào thư mục cài đặt JDK thật.
 - **Docker:** KHÔNG CẦN CÀI ĐẶT DOCKER. Toàn bộ 11 giao thức đều sử dụng thư viện Python thuần hoặc file JAR Java đóng gói độc lập trong thư mục `bin/`.
 
 ---
@@ -556,7 +556,7 @@ iot-protocol-test-harness/
 1. **Thận trọng khi gửi dữ liệu thật:**
    Chế độ `--mode send` và `--mode both` sẽ trực tiếp đẩy dữ liệu telemetry vào broker hoặc server đích. Điều này có thể kích hoạt cảnh báo, ghi log hoặc làm sai lệch số liệu thống kê trên platform. Luôn luôn kiểm tra kỹ host đích và bắt buộc phải truyền cờ xác nhận `--yes`.
 2. **Cảnh báo ghi đè file với TFTP:**
-   Simulator [sim/tftp_sim.py](sim/tftp_sim.py) ở chế độ send sẽ đẩy file lên thư mục lưu trữ của TFTP server. Bắt buộc phải có cờ `--allow-write` và hãy đảm bảo tên file tải lên không ghi đè vào các file cấu hình quan trọng của hệ thống.
+   Simulator [sim/tftp_sim.py](sim/tftp_sim.py) ở chế độ send sẽ đẩy file lên thư mục lưu trữ của TFTP server. Bắt buộc phải có cờ `--allow-write` và đảm bảo tên file tải lên không ghi đè vào các file cấu hình quan trọng của hệ thống.
 3. **Mật khẩu và Token mẫu:**
    Mọi token (`test_token_http`, `test_token_coap`), mật khẩu (`secret`, `guest`) trong [config/config.yaml](config/config.yaml) đều là giá trị ví dụ (mock). Trước khi kết nối vào platform thực tế, người vận hành bắt buộc phải thay thế bằng thông tin tài khoản và access token do platform cấp phát.
 4. **Quy trình vận hành chuẩn khuyến nghị:**
