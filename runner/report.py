@@ -6,7 +6,7 @@ Generates console summary table, JSON export, and Markdown report.
 import json
 import os
 from collections import Counter
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from runner.parse import ParsedResult
 
 MANDATORY_NOTICE = """====================================================================================================
@@ -101,9 +101,19 @@ def print_console_table(results: List[ParsedResult]) -> None:
     print("\n" + MANDATORY_NOTICE + "\n")
 
 
-def write_results_json(results: List[ParsedResult], filepath: str, meta: Dict[str, Any]) -> None:
+def write_results_json(
+    results: List[ParsedResult],
+    filepath: str,
+    meta: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+) -> None:
     """Saves structured execution results as JSON."""
+    from runner.registry import get_protocol_payload_info
+
     os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+    cfg = config or {}
+    show_payload = meta.get("show_payload", False)
+
     data = {
         "metadata": meta,
         "results": [
@@ -117,6 +127,11 @@ def write_results_json(results: List[ParsedResult], filepath: str, meta: Dict[st
                 "notes": r.notes,
                 "raw_cmd": r.raw_cmd,
                 "log_file": r.log_file,
+                "payload_info": (
+                    get_protocol_payload_info(r.proto, cfg, meta.get("target_host", "127.0.0.1"), r.mode)
+                    if show_payload
+                    else None
+                ),
             }
             for r in results
         ],
@@ -125,8 +140,15 @@ def write_results_json(results: List[ParsedResult], filepath: str, meta: Dict[st
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 
-def write_results_md(results: List[ParsedResult], filepath: str, meta: Dict[str, Any]) -> None:
+def write_results_md(
+    results: List[ParsedResult],
+    filepath: str,
+    meta: Dict[str, Any],
+    config: Optional[Dict[str, Any]] = None,
+) -> None:
     """Saves summary report as GitHub-flavored Markdown."""
+    from runner.registry import get_protocol_payload_info
+
     os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
     counts = Counter(r.status for r in results)
     total = len(results)
@@ -161,5 +183,23 @@ def write_results_md(results: List[ParsedResult], filepath: str, meta: Dict[str,
     lines.append("> - **TIMEOUT ở UDP/DDS nghĩa là chưa biết, không phải hỏng.**")
     lines.append("> - **OK ở TCP chỉ là bắt tay, không chứng minh dữ liệu đã được xử lý.**\n")
 
+    if meta.get("show_payload"):
+        cfg = config or {}
+        lines.append("## 4. Chi Tiết Cấu Trúc Bản Tin Đã Gửi\n")
+        for r in results:
+            info = get_protocol_payload_info(r.proto, cfg, meta.get("target_host", "127.0.0.1"), r.mode)
+            lines.append(f"### {r.proto.upper()} ({info['transport']})")
+            lines.append(f"- **Đích đến:** `{info['target']}`")
+            if info.get("headers"):
+                hdr_str = ", ".join(f"`{k}: {v}`" for k, v in info["headers"].items())
+                lines.append(f"- **Headers/Meta:** {hdr_str}")
+            lines.append(f"- **Định dạng:** {info['format']}")
+            lines.append(f"- **Mô tả:** {info['description']}")
+            if info.get("payload"):
+                lines.append("```json")
+                lines.append(json.dumps(info["payload"], indent=2, ensure_ascii=False))
+                lines.append("```\n")
+
     with open(filepath, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+

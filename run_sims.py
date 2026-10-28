@@ -31,6 +31,7 @@ from runner.registry import (
     build_cli_command,
     parse_custom_args,
     detect_supported_flags,
+    print_payload_info,
 )
 from runner.parse import parse_cli_output, ParsedResult
 from runner.report import (
@@ -144,6 +145,18 @@ Ví dụ sử dụng:
         help="Thư mục ghi log và báo cáo kết quả (mặc định: logs/runs/<timestamp>)",
     )
     parser.add_argument(
+        "--show-payload",
+        action="store_true",
+        help="In cấu trúc bản tin và payload mẫu gửi đi của từng simulator ra console và lưu vào báo cáo",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        dest="show_payload",
+        help="Tương đương --show-payload",
+    )
+    parser.add_argument(
         "--grace",
         type=float,
         default=None,
@@ -241,6 +254,8 @@ def main():
             cmd, notes = build_cli_command(entry, args, config, cwd=".", custom_args_map=custom_args_map)
             notes_str = f" [{'; '.join(notes)}]" if notes else ""
             print(f"[DRY-RUN] {entry.name:<10} (nhóm: {entry.group:<8}): {' '.join(cmd)}{notes_str}")
+            if args.show_payload:
+                print_payload_info(entry.name, config, target_host, args.mode)
         print("\n" + MANDATORY_NOTICE + "\n")
         sys.exit(0)
 
@@ -288,6 +303,8 @@ def main():
             proto_port = adapters_cfg[entry.name]["port"]
 
         print(f"[{entry.name.upper()}] Đang chạy: {' '.join(cmd)}")
+        if args.show_payload:
+            print_payload_info(entry.name, config, target_host, args.mode)
         exec_res = execute_cli(
             cmd=cmd,
             timeout=args.timeout,
@@ -325,9 +342,10 @@ def main():
         "target_host": target_host,
         "timeout": args.timeout,
         "run_dir": run_dir,
+        "show_payload": args.show_payload,
     }
-    write_results_json(results, json_path, meta)
-    write_results_md(results, md_path, meta)
+    write_results_json(results, json_path, meta, config=config)
+    write_results_md(results, md_path, meta, config=config)
     print(f"[*] Báo cáo đã lưu: {json_path}")
     print(f"[*] Báo cáo đã lưu: {md_path}")
 

@@ -175,11 +175,22 @@ Sau khi cài đặt xong môi trường, bạn có thể thực hiện kiểm tr
 | `--duration` | `5.0` (giây) | Thời gian lắng nghe downlink (dùng cho chế độ `listen` hoặc `both`). |
 | `--arg` | Không có | Bổ sung tham số thô cho từng CLI cụ thể (vd: `--arg 'mqtt="--port 1884"'`). |
 | `--dry-run` | `False` | Chỉ in lệnh thực thi dự kiến, không chạy tiến trình thật. |
+| `--show-payload` (hoặc `-v`) | `False` | In chi tiết cấu trúc bản tin và payload mẫu gửi đi của từng simulator ra console và ghi vào báo cáo kết quả (`results.json`, `results.md`). |
 | `--yes` | `False` | **Chốt an toàn:** Bắt buộc phải có khi chạy chế độ `--mode send` hoặc `--mode both`. |
 | `--allow-write` | `False` | **Chốt an toàn:** Bắt buộc phải có nếu chạy TFTP ở chế độ `send` hoặc `both` để cho phép ghi file lên server. |
 | `--out-dir` | `logs/runs/<thời_điểm>` | Ghi đè thư mục lưu trữ log và báo cáo kết quả. |
 
 ### 7.2. Các ví dụ sử dụng thực tế
+
+* **Xem trước cấu trúc bản tin và payload của toàn bộ 12 mục tiêu (không chạy thật):**
+  ```powershell
+  python run_sims.py --dry-run --show-payload
+  ```
+
+* **Chạy kiểm tra và in chi tiết cấu trúc bản tin gửi đi ra màn hình:**
+  ```powershell
+  python run_sims.py --mode connect --show-payload --only http,mqtt
+  ```
 
 * **Chỉ kiểm tra kết nối MQTT và HTTP:**
   ```powershell

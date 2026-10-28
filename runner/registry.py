@@ -3,13 +3,14 @@ Runner Registry Module
 Manages CLI definitions, capability discovery, and command-line construction.
 """
 
+import json
 import os
 import re
 import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 CHECK_FLAGS = [
     "--host",
@@ -269,3 +270,252 @@ def build_cli_command(
         cmd.extend(custom_args_map[entry.name.lower()])
 
     return cmd, notes
+
+
+def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.0.0.1", mode: str = "send") -> Dict[str, Any]:
+    """
+    Returns structured information about the message and payload sent by the simulator.
+    """
+    adapters = config.get("adapters", {})
+    global_cfg = config.get("global", {})
+    device_id = global_cfg.get("device_id", "sim_device_001")
+
+    info: Dict[str, Any] = {
+        "proto": proto,
+        "mode": mode,
+        "transport": "",
+        "target": "",
+        "format": "",
+        "headers": {},
+        "payload": None,
+        "description": "",
+    }
+
+    if proto == "http":
+        cfg = adapters.get("http", {})
+        port = cfg.get("port", 8080)
+        path = cfg.get("path", "/api/v1/telemetry")
+        token = cfg.get("access_token", "test_token_http")
+        info["transport"] = "HTTP POST (REST)"
+        info["target"] = f"http://{target_host}:{port}{path}"
+        info["headers"] = {"Content-Type": "application/json", "X-Authorization": f"Bearer {token}"}
+        info["format"] = "JSON"
+        info["payload"] = {
+            "device_id": device_id,
+            "seq": 1,
+            "temperature": 25.5,
+            "humidity": 59.8,
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "Bản tin HTTP POST gửi dữ liệu cảm biến dạng JSON tới platform REST API"
+
+    elif proto == "mqtt":
+        cfg = adapters.get("mqtt", {})
+        port = cfg.get("port", 1883)
+        topic = cfg.get("topic", "v1/devices/me/telemetry")
+        info["transport"] = "MQTT PUBLISH (QoS 1)"
+        info["target"] = f"mqtt://{target_host}:{port} -> topic: '{topic}'"
+        info["headers"] = {"client_id": cfg.get("client_id", "iot_test_client_001"), "qos": cfg.get("qos", 1)}
+        info["format"] = "JSON"
+        info["payload"] = {
+            "device_id": device_id,
+            "seq": 1,
+            "temperature": 26.8,
+            "humidity": 54.9,
+            "status": "ONLINE",
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "Bản tin MQTT Publish telemetry dạng JSON vào telemetry topic"
+
+    elif proto == "coap":
+        cfg = adapters.get("coap", {})
+        port = cfg.get("port", 5683)
+        path = cfg.get("path", "api/v1/telemetry")
+        info["transport"] = "CoAP POST (CON - Confirmable)"
+        info["target"] = f"coap://{target_host}:{port}/{path}"
+        info["headers"] = {"code": "0.02 (POST)", "type": "CON", "token": cfg.get("access_token", "test_token_coap")}
+        info["format"] = "JSON (encoded UTF-8 bytes)"
+        info["payload"] = {
+            "device_id": device_id,
+            "seq": 1,
+            "temperature": 23.8,
+            "humidity": 64.7,
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "Bản tin CoAP POST CON mang dữ liệu telemetry dạng JSON"
+
+    elif proto == "xmpp":
+        cfg = adapters.get("xmpp", {})
+        port = cfg.get("port", 5222)
+        target_jid = cfg.get("target_adapter_jid", "adapter@iot.local")
+        info["transport"] = "XMPP Chat Message Stanza"
+        info["target"] = f"xmpp://{target_host}:{port} -> to: '{target_jid}'"
+        info["headers"] = {"type": "chat", "from": cfg.get("client_jid", "sim_device_001@iot.local")}
+        info["format"] = "JSON trong body của XMPP stanza"
+        info["payload"] = {
+            "device_id": device_id,
+            "seq": 1,
+            "temperature": 24.2,
+            "humidity": 57.5,
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "Bản tin XMPP chat message stanza gửi telemetry JSON tới adapter JID"
+
+    elif proto == "amqp":
+        cfg = adapters.get("amqp", {})
+        port = cfg.get("port", 5672)
+        exchange = cfg.get("exchange", "iot.telemetry")
+        routing_key = cfg.get("routing_key", "device.telemetry")
+        info["transport"] = "AMQP 0-9-1 basic_publish"
+        info["target"] = f"amqp://{target_host}:{port}/ -> exchange: '{exchange}', routing_key: '{routing_key}'"
+        info["headers"] = {"content_type": "application/json", "delivery_mode": 2, "headers": {"device_id": device_id}}
+        info["format"] = "JSON"
+        info["payload"] = {
+            "device_id": device_id,
+            "seq": 1,
+            "temperature": 23.2,
+            "humidity": 61.7,
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "Bản tin AMQP basic_publish tới exchange và routing key của platform"
+
+    elif proto == "dds":
+        cfg = adapters.get("dds", {})
+        domain_id = cfg.get("domain_id", 0)
+        topic = cfg.get("topic_name", "IoTTelemetryTopic")
+        info["transport"] = "CycloneDDS RTPS (Multicast)"
+        info["target"] = f"DDS Domain {domain_id} -> topic: '{topic}'"
+        info["headers"] = {"schema": "payloads/telemetry_schema.idl", "struct": "IoT::Telemetry"}
+        info["format"] = "DDS CDR Binary (OMG IDL 4.2)"
+        info["payload"] = {
+            "device_id": device_id,
+            "timestamp": 1793156222891,
+            "temperature": 25.5,
+            "humidity": 49.8,
+            "status": "NORMAL",
+        }
+        info["description"] = "Mẫu dữ liệu nhị phân CDR ghi qua CycloneDDS DataWriter"
+
+    elif proto == "lwm2m":
+        cfg = adapters.get("lwm2m", {})
+        port = cfg.get("port", 5683)
+        endpoint = cfg.get("endpoint_name", "lwm2m_sim_device_001")
+        info["transport"] = "OMA LwM2M v1.0/v1.1 (CoAP UDP)"
+        info["target"] = f"coap://{target_host}:{port} -> endpoint: '{endpoint}'"
+        info["headers"] = {"query": f"ep={endpoint}&lt=60&b=U", "link_format": "</1/0>,</2/0>,</3/0>,</3303/0>"}
+        info["format"] = "OMA IPSO Smart Objects (TLV / Plain Text)"
+        info["payload"] = {
+            "Object_3_Device": {"Manufacturer": "Eclipse Leshan", "Model": "Test Harness Device", "Firmware": "1.0.0"},
+            "Object_3303_Temperature": {"Resource_5700_SensorValue": 25.5, "Resource_5701_Unit": "Cel"},
+        }
+        info["description"] = "Bản tin đăng ký LwM2M CoAP POST Registration và các OMA IPSO Objects"
+
+    elif proto == "lorawan":
+        cfg = adapters.get("lorawan", {})
+        port = cfg.get("port", 1700)
+        gw_eui = cfg.get("gateway_eui", "AA555A0000000101")
+        info["transport"] = "Semtech UDP Packet Forwarder v2"
+        info["target"] = f"udp://{target_host}:{port} -> Gateway EUI: {gw_eui}"
+        info["headers"] = {"version": "0x02", "identifier": "0x00 (PUSH_DATA)", "gateway_eui": gw_eui}
+        info["format"] = "12-byte Binary Header + JSON rxpk (Base64 data)"
+        info["payload"] = {
+            "rxpk": [
+                {
+                    "time": "2026-10-28T03:55:00.000000Z",
+                    "tmst": 12345678,
+                    "freq": 868.1,
+                    "datr": "SF7BW125",
+                    "rssi": -65,
+                    "size": 33,
+                    "data": "gAEAAACAAAAABBEPAQIDBAUGBwgJCgsMDQ==",
+                }
+            ]
+        }
+        info["description"] = "Gói tin Semtech UDP PUSH_DATA chứa payload cảm biến mã hóa Base64"
+
+    elif proto == "websocket":
+        cfg = adapters.get("websocket", {})
+        port = cfg.get("port", 8080)
+        path = cfg.get("path", "/ws/telemetry")
+        info["transport"] = "WebSocket Text Frame (RFC 6455)"
+        info["target"] = f"ws://{target_host}:{port}{path}"
+        info["headers"] = {"Upgrade": "websocket", "Connection": "Upgrade"}
+        info["format"] = "JSON"
+        info["payload"] = {
+            "device_id": device_id,
+            "seq": 1,
+            "temperature": 25.7,
+            "humidity": 51.6,
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "Khung truyền WebSocket text frame gửi telemetry dạng JSON"
+
+    elif proto == "tcp":
+        cfg = adapters.get("tcp_udp", {})
+        port = cfg.get("tcp_port", 9000)
+        info["transport"] = "Raw TCP Stream Socket"
+        info["target"] = f"tcp://{target_host}:{port}"
+        info["headers"] = {"delimiter": "\\n (Line feed)"}
+        info["format"] = "JSON + Newline"
+        info["payload"] = {
+            "device_id": device_id,
+            "proto": "TCP",
+            "seq": 1,
+            "temperature": 25.1,
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "Chuỗi JSON kết thúc bằng dấu xuống dòng gửi qua raw TCP socket"
+
+    elif proto == "udp":
+        cfg = adapters.get("tcp_udp", {})
+        port = cfg.get("udp_port", 9001)
+        info["transport"] = "Raw UDP Datagram Socket"
+        info["target"] = f"udp://{target_host}:{port}"
+        info["headers"] = {}
+        info["format"] = "JSON Datagram"
+        info["payload"] = {
+            "device_id": device_id,
+            "proto": "UDP",
+            "seq": 1,
+            "temperature": 26.2,
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "Gói tin datagram JSON gửi trực tiếp qua raw UDP socket"
+
+    elif proto == "tftp":
+        cfg = adapters.get("tftp", {})
+        port = cfg.get("port", 69)
+        file_path = cfg.get("local_upload_file", "payloads/sample_tftp_file.txt")
+        info["transport"] = "TFTP Protocol (RFC 1350)"
+        info["target"] = f"udp://{target_host}:{port} -> file: '{cfg.get('remote_filename', 'device_config_test.txt')}'"
+        info["headers"] = {"block_size": cfg.get("block_size", 512), "source_file": file_path}
+        info["format"] = "TFTP 512B Blocks (File INI Config)"
+        info["payload"] = {
+            "[device]": {"device_id": device_id, "firmware": "3.2.1"},
+            "[sensors]": {"temperature.unit": "celsius", "humidity.unit": "percent"},
+            "[telemetry]": {"report_interval_sec": 30, "topic": "v1/devices/me/telemetry"},
+        }
+        info["description"] = "File cấu hình thiết bị mẫu định dạng INI truyền qua các khối TFTP 512B"
+
+    return info
+
+
+def print_payload_info(proto: str, config: dict, target_host: str = "127.0.0.1", mode: str = "send") -> None:
+    """
+    Prints formatted message and payload structure to console.
+    """
+    info = get_protocol_payload_info(proto, config, target_host, mode)
+    print(f"  +--- [BẢN TIN {proto.upper()}] ---")
+    print(f"  | Vận chuyển : {info['transport']}")
+    print(f"  | Đích đến   : {info['target']}")
+    if info.get("headers"):
+        hdr_str = ", ".join(f"{k}: {v}" for k, v in info["headers"].items())
+        print(f"  | Headers/Meta: {hdr_str}")
+    print(f"  | Định dạng  : {info['format']}")
+    if info.get("payload"):
+        payload_json = json.dumps(info["payload"], indent=2, ensure_ascii=False)
+        indented = "\n".join("  |   " + line for line in payload_json.splitlines())
+        print(f"  | Cấu trúc bản tin mẫu:")
+        print(indented)
+    print(f"  +-------------------------------------------------------------")
+
