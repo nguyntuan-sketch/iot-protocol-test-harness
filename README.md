@@ -13,7 +13,7 @@ Bộ công cụ giả lập phía thiết bị (IoT Device Simulators) độc l�
 
 ### 1.2. Công cụ này KHÔNG phải là gì?
 - **KHÔNG phải là IoT Platform:** Bộ công cụ không lưu trữ dữ liệu, không có cơ sở dữ liệu thời gian thực và không quản lý vòng đời thiết bị.
-- **KHÔNG tự dựng server hay broker giả lập nội bộ:** Các simulator đóng vai trò client bắn vào platform thật của bạn (ngoại lệ duy nhất: file demo server [bin/leshan-server-demo.jar](bin/leshan-server-demo.jar) được cung cấp kèm theo chỉ để bạn thử nghiệm LwM2M cục bộ khi cần).
+- **KHÔNG tự dựng server hay broker giả lập nội bộ:** Các simulator đóng vai trò client kết nối tới IoT Platform thực tế (ngoại lệ duy nhất: file demo server [bin/leshan-server-demo.jar](bin/leshan-server-demo.jar) được cung cấp kèm theo phục vụ kiểm thử LwM2M cục bộ khi cần).
 - **KHÔNG gán nhãn Pass/Fail:** Runner không kết luận Pass/Fail tùy tiện mà phân loại trung thực 5 trạng thái mạng/giao thức: `OK`, `REFUSED`, `TIMEOUT`, `AUTH_FAILED`, `PROTO_ERROR`.
 - **KHÔNG chứng minh dữ liệu đã được lưu trữ:** Trạng thái kết nối thành công chỉ chứng minh tầng mạng và bắt tay giao thức đã hoàn tất; việc dữ liệu có được platform bóc tách, lưu trữ vào cơ sở dữ liệu hay kích hoạt rule-engine hay không cần được kiểm chứng bằng REST API hoặc giao diện quản trị của chính platform đó.
 
@@ -73,7 +73,7 @@ Khuyến nghị sử dụng Conda hoặc virtualenv độc lập để tránh xu
 
 Dự án cung cấp 2 file khai báo phụ thuộc:
 - [requirements.lock.txt](requirements.lock.txt) (Khuyến nghị): Chứa phiên bản chính xác 100% đã được kiểm chứng hoạt động ổn định trên môi trường thử nghiệm.
-- [requirements.txt](requirements.txt): Chứa phiên bản tối thiểu (`>=`) nếu bạn cần linh hoạt nâng cấp.
+- [requirements.txt](requirements.txt): Chứa phiên bản tối thiểu (`>=`) phục vụ nhu cầu nâng cấp linh hoạt.
 
 Thực hiện cài đặt:
 ```powershell
@@ -90,12 +90,12 @@ Thực thi script kiểm tra toàn diện trước khi vận hành:
 *(Lưu ý: Đối với môi trường Linux/macOS, sử dụng `./setup_environment.sh` - chưa kiểm chứng trên Windows).*
 
 ### Bước 4: Cách đọc kết quả kiểm tra
-Khi chạy xong `setup_environment.ps1`, bạn sẽ nhận được báo cáo gồm 6 phần (41 hạng mục kiểm tra):
+Sau khi chạy xong `setup_environment.ps1`, hệ thống xuất báo cáo gồm 6 phần (41 hạng mục kiểm tra):
 1. **System Prerequisites:** Báo `[PASS]` cho Python, pip, Java. Cảnh báo `[WARN] Docker not installed` là bình thường vì dự án không dùng Docker.
 2. **Directory Structure & Required Files:** Xác nhận đủ các thư mục và file cấu hình, payload.
 3. **Python Libraries:** Xác nhận nạp thành công 14 thư viện lõi (`requests`, `paho-mqtt`, `aiocoap`, `slixmpp`, `pika`, `cyclonedds`, `websockets`, `tftpy`, `yaml`, v.v.).
 4. **Group B Tools & Checksums:** Kiểm tra tính toàn vẹn SHA-256 của file `bin/leshan-client-demo.jar` khớp với [bin/VERSIONS.md](bin/VERSIONS.md).
-5. **Target Ports & Reachability:** Quét cổng platform. Nếu thấy báo `UNREACHABLE` hoặc `UNKNOWN (UDP)` thì đây là trạng thái bình thường khi bạn chưa khởi động IoT Platform đích.
+5. **Target Ports & Reachability:** Quét cổng platform. Trạng thái `UNREACHABLE` hoặc `UNKNOWN (UDP)` là bình thường khi IoT Platform đích chưa được khởi động.
 6. **Tổng kết:** Phải đạt `Passed checks: 41` và `Failed checks: 0`.
 
 ---
@@ -119,15 +119,15 @@ File cấu hình trung tâm được chia làm các khối chức năng rõ ràn
 Được `run_sims.py` đọc để xác định nhóm cổng thực thi tuần tự, cảnh báo cổng 8080, thời gian ân hạn (`grace` tối thiểu 15s cho LwM2M) và các quy tắc kiểm tra an toàn.
 
 ### 5.3. Việc phải làm trước khi chạy lần đầu
-1. **Kiểm tra xung đột cổng 8080:** Chạy lệnh `netstat -ano | findstr :8080`. Nếu phát hiện có tiến trình khác đang chiếm cổng 8080 (ví dụ web server nội bộ), hãy mở [config/config.yaml](config/config.yaml) và sửa cổng của `adapters.http.port` và `adapters.websocket.port` sang đúng cổng của IoT Platform.
+1. **Kiểm tra xung đột cổng 8080:** Chạy lệnh `netstat -ano | findstr :8080`. Nếu phát hiện có tiến trình khác đang chiếm cổng 8080 (ví dụ web server nội bộ), mở [config/config.yaml](config/config.yaml) và sửa cổng của `adapters.http.port` và `adapters.websocket.port` sang đúng cổng của IoT Platform.
 2. **Cập nhật thông tin xác thực:** Điền token thiết bị vào `adapters.http.access_token` và `adapters.coap.access_token`; cập nhật `username`/`password` cho MQTT và AMQP; điền JID hợp lệ cho XMPP.
-3. **Xác nhận kiểu xác thực HTTP:** Mặc định là gửi token qua Header (`auth_mode: "header"`). Nếu platform của bạn yêu cầu token nằm trên URL query (`/api/v1/{token}/telemetry`), hãy đổi sang `auth_mode: "url_token"`.
+3. **Xác nhận kiểu xác thực HTTP:** Mặc định gửi token qua Header (`auth_mode: "header"`). Nếu platform yêu cầu token nằm trên URL query (`/api/v1/{token}/telemetry`), chuyển sang `auth_mode: "url_token"`.
 
 ---
 
 ## 6. Bắt đầu nhanh
 
-Sau khi cài đặt xong môi trường, bạn có thể thực hiện kiểm tra nhanh theo 4 bước:
+Sau khi hoàn tất cài đặt môi trường, quy trình kiểm tra nhanh gồm 4 bước:
 
 * **Bước 1: Xem trước các lệnh sẽ chạy (Dry-run):**
   ```powershell
@@ -218,7 +218,7 @@ Sau khi cài đặt xong môi trường, bạn có thể thực hiện kiểm tr
   ```
 
 ### 7.3. Các chốt an toàn (Safety Barriers)
-1. **Chặn gửi dữ liệu ngoài ý muốn:** Khi bạn chạy `--mode send` hoặc `--mode both`, runner sẽ dừng lại và thoát mã 10 nếu bạn không truyền cờ `--yes`. Điều này ngăn chặn việc vô tình bắn dữ liệu rác vào platform đang vận hành.
+1. **Chặn gửi dữ liệu ngoài ý muốn:** Khi chạy `--mode send` hoặc `--mode both`, runner sẽ dừng lại và thoát mã 10 nếu thiếu cờ `--yes`. Cơ chế này ngăn chặn việc vô tình gửi dữ liệu rác vào platform đang vận hành.
 2. **Bảo vệ ghi đè TFTP:** Giao thức TFTP truyền file nhị phân. Nếu chạy send/both mà thiếu cờ `--allow-write`, runner sẽ tự động đánh dấu TFTP là `SKIPPED` để tránh ghi đè file trên máy chủ.
 3. **Kẹp timeout tối thiểu 3 giây:** Loopback trên Windows khi gặp cổng đóng cần khoảng 2 giây để hoàn thành chu trình thử nghiệm socket; nếu đặt timeout dưới 3s, kết quả sẽ bị nhầm lẫn thành `TIMEOUT` thay vì `REFUSED`.
 
@@ -267,7 +267,7 @@ Mỗi simulator trong thư mục `sim/` có thể được gọi độc lập b�
    ```powershell
    python sim/lwm2m_sim.py --mode connect --server-uri coap://127.0.0.1:5683 --timeout 5.0
    ```
-   > **CẢNH BÁO QUAN TRỌNG:** Khi chạy riêng lẻ `sim/lwm2m_sim.py`, nếu bạn ngắt bằng `Ctrl+C`, tiến trình Java nền có thể không kịp đóng. Hãy chạy lệnh `tasklist | findstr /i java` để kiểm tra. Nếu còn tồn tại PID java, hãy dọn bằng script [scripts/teardown.ps1](scripts/teardown.ps1).
+   > **CẢNH BÁO QUAN TRỌNG:** Khi chạy riêng lẻ `sim/lwm2m_sim.py`, nếu ngắt bằng `Ctrl+C`, tiến trình Java nền có thể không kịp đóng. Chạy lệnh `tasklist | findstr /i java` để kiểm tra. Nếu còn tồn tại PID java, thực thi dọn dẹp bằng script [scripts/teardown.ps1](scripts/teardown.ps1).
 8. **LoRaWAN ([sim/lorawan_sim.py](sim/lorawan_sim.py)):**
    ```powershell
    python sim/lorawan_sim.py --mode connect --host 127.0.0.1 --port 1700 --timeout 5.0
@@ -319,7 +319,7 @@ RESULT: <giao_thức> [mode=<CHẾ_ĐỘ> | <TRẠNG_THÁI>] detail=<chi_tiết_
 
 ## 10. Thử nghiệm LwM2M cục bộ (Tùy chọn)
 
-Nếu bạn chưa có sẵn LwM2M Server trên platform, dự án có sẵn demo server chính thức của Eclipse Leshan trong thư mục `bin/` để bạn tự kiểm chứng vòng đời LwM2M Client.
+Trường hợp chưa triển khai LwM2M Server trên platform, sử dụng demo server chính thức của Eclipse Leshan có sẵn trong thư mục `bin/` để kiểm chứng vòng đời LwM2M Client.
 
 ### 10.1. Khởi chạy Leshan Server Demo
 Mở một cửa sổ terminal mới và thực thi:
@@ -348,7 +348,115 @@ Kết quả mong đợi: `RESULT: lwm2m connect=OK detail=[stage:registration] R
 
 ---
 
-## 11. Bảng xử lý sự cố thường gặp (Troubleshooting)
+## 11. Hướng dẫn cấu hình kết nối tới IoT Platform bên ngoài
+
+Khi chuyển từ môi trường kiểm thử cục bộ (`127.0.0.1`) sang kết nối với một IoT Platform thực tế bên ngoài (on-premise server, máy ảo LAN hoặc cloud server), người vận hành điều chỉnh **file cấu hình trung tâm** [config/config.yaml](config/config.yaml) hoặc **ghi đè bằng tham số dòng lệnh CLI**.
+
+### 11.1. Các trường cần chỉnh sửa trong [config/config.yaml](config/config.yaml)
+
+Toàn bộ thông số kết nối của 11 giao thức nằm tập trung trong tệp [config/config.yaml](config/config.yaml). Mở tệp và cập nhật các khối sau:
+
+#### 1. Khối thông số chung (`global`)
+```yaml
+global:
+  target_host: "192.168.1.100"  # Đổi thành IP hoặc Domain của IoT Platform đích (thay cho 127.0.0.1)
+  timeout_sec: 5                # Thời gian chờ tối đa cho mỗi kết nối (giây)
+  device_id: "your_device_001"  # Mã định danh thiết bị đã đăng ký trên platform
+  telemetry_payload:            # Dữ liệu cảm biến cần gửi lên platform
+    temperature: 26.5
+    humidity: 65.0
+    status: "OK"
+```
+
+#### 2. Khối cấu hình từng giao thức (`adapters.<protocol>`)
+Tùy thuộc giao thức tiếp nhận dữ liệu của platform đích, điều chỉnh khối cấu hình tương ứng:
+
+* **HTTP (`adapters.http`):**
+  * `port`: Cổng dịch vụ HTTP của platform (mặc định 8080, hoặc 443 nếu dùng HTTPS).
+  * `auth_mode`: Chọn `"header"` (gửi token trong Header HTTP) hoặc `"url_token"` (gửi token nằm trên URL path).
+  * `access_token`: Token xác thực của thiết bị do platform cấp.
+  * `path` / `path_template`: Endpoint nhận telemetry (ví dụ `/api/v1/telemetry` hoặc `/api/v1/{token}/telemetry`).
+  * `headers`: Khai báo header xác thực nếu dùng `auth_mode: "header"` (ví dụ `X-Authorization: Bearer <token>` hoặc `Authorization`).
+
+* **MQTT (`adapters.mqtt`):**
+  * `port`: Cổng MQTT Broker (mặc định 1883, hoặc 8883 nếu bật TLS).
+  * `topic`: Topic tiếp nhận telemetry theo quy định của platform (ví dụ: `v1/devices/me/telemetry` hoặc `devices/{device_id}/telemetry`).
+  * `username` / `password`: Tài khoản kết nối MQTT (nhiều platform dùng `username` chính là Device Access Token và để trống password).
+  * `client_id`: ID của MQTT client (đổi sang chuỗi ngẫu nhiên nếu broker từ chối do trùng lặp).
+  * `qos`: Mức chất lượng dịch vụ (0, 1 hoặc 2).
+
+* **CoAP (`adapters.coap`):**
+  * `port`: Cổng CoAP Server (mặc định 5683, hoặc 5684 nếu DTLS).
+  * `path`: Đường dẫn resource nhận telemetry (ví dụ `api/v1/telemetry` hoặc `api/v1/{token}/telemetry`).
+  * `access_token`: Token xác thực thiết bị.
+
+* **AMQP (`adapters.amqp`):**
+  * `port`: Cổng AMQP Broker (mặc định 5672, hoặc 5671 nếu TLS).
+  * `username` / `password`: Tài khoản đăng nhập AMQP broker.
+  * `virtual_host`: Virtual host (mặc định `/`).
+  * `exchange` / `queue` / `routing_key`: Thông số định tuyến message trên RabbitMQ/ActiveMQ.
+
+* **WebSocket (`adapters.websocket`):**
+  * `port`: Cổng WebSocket service (mặc định 8080, hoặc 8443 / 443 nếu TLS).
+  * `path`: Đường dẫn URI WebSocket (ví dụ `/ws/telemetry` hoặc `/api/v1/ws`).
+  * `headers`: Headers xác thực kèm theo khi bắt tay WebSocket handshake.
+
+* **TCP / UDP thô (`adapters.tcp_udp`):**
+  * `port_tcp`: Cổng TCP socket lắng nghe (mặc định 9000).
+  * `port_udp`: Cổng UDP socket lắng nghe (mặc định 9001).
+
+* **LoRaWAN (`adapters.lorawan`):**
+  * `port`: Cổng Semtech Packet Forwarder UDP của Network Server (mặc định 1700).
+  * `dev_addr` / `gw_eui`: Địa chỉ thiết bị và mã EUI của Gateway.
+
+#### 3. Khối kết nối bảo mật (`tls`)
+Nếu platform yêu cầu mã hóa kết nối:
+```yaml
+tls:
+  enabled: true                 # Bật kiểm thử qua cổng bảo mật TLS/DTLS
+  ca_cert_path: "certs/ca.crt"  # Đường dẫn tới file root CA certificate (.crt/.pem)
+  client_cert_path: ""          # Đường dẫn client cert (nếu platform yêu cầu mTLS)
+  client_key_path: ""           # Đường dẫn client private key
+  insecure_skip_verify: true    # Đặt true để bỏ qua xác thực chứng chỉ nếu dùng cert tự ký
+```
+
+---
+
+### 11.2. Cách thay thế: Ghi đè bằng cờ dòng lệnh CLI (Không cần sửa file)
+
+Để kiểm tra nhanh mà không cần sửa tệp `config.yaml`, có thể truyền trực tiếp tham số qua dòng lệnh:
+
+* **Ghi đè host cho toàn bộ suite với `run_sims.py`:**
+  ```powershell
+  # Kiểm tra kết nối tới server ngoài:
+  python run_sims.py --host 192.168.1.100 --mode connect
+
+  # Gửi dữ liệu qua MQTT và HTTP tới server ngoài kèm in cấu trúc bản tin:
+  python run_sims.py --host 192.168.1.100 --mode send --only mqtt,http --show-payload --yes
+  ```
+
+* **Ghi đè tài khoản và tham số khi chạy từng simulator độc lập:**
+  ```powershell
+  # MQTT: chỉ định host, port, username/token, password, topic
+  python sim/mqtt_sim.py --mode send --host iot.example.com --port 1883 -u MY_DEVICE_TOKEN -p "" --topic v1/devices/me/telemetry --count 3
+
+  # HTTP: chỉ định host, port, token và phương thức xác thực qua URL
+  python sim/http_sim.py --mode send --host iot.example.com --port 443 --tls --auth-mode url_token --token MY_DEVICE_TOKEN --count 1
+  ```
+
+---
+
+### 11.3. Đối soát kết quả dữ liệu (Verification)
+
+Sau khi chạy ở chế độ `send` thành công (mã thoát 0):
+1. **Dữ liệu đối chiếu:** Khi kích hoạt cờ `--show-payload` (hoặc mở báo cáo `logs/runs/<thời_điểm>/results.json`), harness in ra chính xác:
+   - Thời điểm gửi (`timestamp` dạng epoch mili-giây).
+   - Nội dung bản tin JSON chi tiết (`device_id`, `temperature`, `humidity`, `seq`...).
+2. **Đối soát trên platform:** Mở cơ sở dữ liệu, màn hình telemetry hoặc API truy vấn dữ liệu của platform đích để so sánh các trường dữ liệu xem platform đã bóc tách và ghi nhận chính xác hay chưa.
+
+---
+
+## 12. Bảng xử lý sự cố thường gặp (Troubleshooting)
 
 | Triệu chứng | Nguyên nhân khả dĩ | Hướng dẫn xử lý |
 | :--- | :--- | :--- |
@@ -358,12 +466,12 @@ Kết quả mong đợi: `RESULT: lwm2m connect=OK detail=[stage:registration] R
 | **MQTT Broker ngắt kết nối im lặng (Connection closed)** | Trùng `client_id` với một client khác đang kết nối vào broker, hoặc username/password chưa được cấp quyền trong ACL. | Đổi `client_id` trong [config/config.yaml](config/config.yaml) thành chuỗi ngẫu nhiên (ví dụ `client_id: "test_client_999"`). |
 | **DDS báo `TIMEOUT` không thấy participant từ xa** | Mạng Multicast bị chặn bởi Firewall Windows, VPN đang bật, hoặc CycloneDDS tự chọn card mạng ảo (WSL/Hyper-V/VMware). | Tắt tạm thời VPN; mở inbound rule cho UDP; hoặc gán biến môi trường `CYCLONEDDS_URI` trỏ thẳng vào IP của card mạng vật lý đang kết nối platform. |
 | **CoAP DTLS không hoạt động trên Windows** | Thư viện `aiocoap` trên Windows thiếu backend OpenSSL DTLSSocket tương thích natively. | Chạy chế độ CoAP không mã hóa (cổng 5683) trên Windows; hoặc chuyển sang môi trường Linux nếu bắt buộc kiểm thử DTLS (coaps). |
-| **Chạy runner lập tức văng mã lỗi 10** | Bạn đang chạy bằng Python base của hệ điều hành, thiếu các module bắt buộc (`pika`, `cyclonedds`, `yaml`). | Kích hoạt đúng môi trường Conda trước khi chạy: `conda activate iot-test`. |
+| **Chạy runner lập tức văng mã lỗi 10** | Đang chạy bằng Python base của hệ điều hành, thiếu các module bắt buộc (`pika`, `cyclonedds`, `yaml`). | Kích hoạt đúng môi trường Conda trước khi chạy: `conda activate iot-test`. |
 | **Xuất hiện "thiết bị ma" (phantom device) LwM2M** | Tiến trình Leshan client cũ bị sót và định kỳ tự động gửi bản tin update registration lên server. | Dọn dẹp triệt để tiến trình Java mồ côi bằng lệnh: `taskkill /F /IM java.exe`. |
 
 ---
 
-## 12. Cấu trúc thư mục dự án
+## 13. Cấu trúc thư mục dự án
 
 Toàn bộ 42 file trong repository được tổ chức tinh gọn và chuẩn hóa như sau:
 
@@ -429,21 +537,21 @@ iot-protocol-test-harness/
 
 ---
 
-## 13. Các giới hạn đã biết
+## 14. Các giới hạn đã biết
 
 1. **Mức độ kiểm chứng với Platform thực tế:**
-   - Bộ công cụ mới được kiểm chứng trên môi trường loopback cục bộ (`127.0.0.1`) và qua các server demo độc lập. Người dùng cần chủ động kiểm tra thực tế với IoT Platform đích.
+   - Bộ công cụ đã được kiểm chứng trên môi trường loopback cục bộ (`127.0.0.1`), qua các server demo độc lập và qua kết nối thực tế tới IoT Cloud Platform bằng MQTT và HTTP. Người dùng cần chủ động kiểm tra với các cổng hoặc adapter đặc thù khác của IoT Platform đích.
 2. **Hiện trạng hỗ trợ TLS / DTLS:**
    - Mã nguồn các CLI đã có sẵn tham số và cờ `--tls`, `--insecure` cho các giao thức (HTTP, MQTT, CoAP, XMPP, AMQP, WebSocket).
-   - Tuy nhiên, phần lớn các bài kiểm thử tự động hiện tại mới chạy ở chế độ không mã hóa (Plaintext). Việc kiểm thử với chứng chỉ bảo mật (x509 CA cert, Client cert, PSK DTLS) cần được cấu hình bổ sung đường dẫn cert thật trong khối `tls` của [config/config.yaml](config/config.yaml) và đánh dấu là *(chưa kiểm chứng trên hạ tầng bảo mật thực)*.
+   - Đã kiểm chứng thành công HTTPS cổng 443 và MQTT cổng 1883 tới cloud server ngoài. Các giao thức kiểm thử với chứng chỉ bảo mật riêng biệt (x509 CA cert, Client cert, PSK DTLS) cần được cấu hình bổ sung đường dẫn cert thật trong khối `tls` của [config/config.yaml](config/config.yaml).
 3. **Mức độ kiểm chứng chế độ `send` và `listen`:**
-   - Các chế độ `send` và `listen` đã được kiểm chứng cú pháp và đóng gói bản tin, nhưng chưa thực hiện đo lường hiệu năng tải lớn (stress test) hay kiểm tra mất gói trên đường truyền mạng diện rộng.
+   - Các chế độ `send` và `listen` đã được kiểm chứng cú pháp, đóng gói bản tin và gửi nhận thành công, nhưng chưa thực hiện đo lường hiệu năng tải lớn (stress test) hay kiểm tra mất gói trên đường truyền mạng diện rộng.
 4. **Phạm vi kiểm thử:**
    - Bộ công cụ chỉ dừng lại ở việc kiểm tra tính tương thích ở tầng giao thức (Protocol & Transport Layer). Công cụ không có khả năng tự động xác thực xem dữ liệu cảm biến sau khi đến platform có được giải mã đúng quy tắc hay được lưu trữ vào cơ sở dữ liệu hay không.
 
 ---
 
-## 14. Lưu ý 
+## 15. Lưu ý quan trọng
 
 1. **Thận trọng khi gửi dữ liệu thật:**
    Chế độ `--mode send` và `--mode both` sẽ trực tiếp đẩy dữ liệu telemetry vào broker hoặc server đích. Điều này có thể kích hoạt cảnh báo, ghi log hoặc làm sai lệch số liệu thống kê trên platform. Luôn luôn kiểm tra kỹ host đích và bắt buộc phải truyền cờ xác nhận `--yes`.
