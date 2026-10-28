@@ -31,7 +31,7 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result
+    format_result, setup_simulator_logger
 )
 
 try:
@@ -75,26 +75,8 @@ def get_default_config():
     return cfg
 
 
-def setup_logger():
-    log_dir = os.path.join(base_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "lwm2m.log")
-
-    logger = logging.getLogger("lwm2m_sim")
-    logger.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-
-    fh = logging.FileHandler(log_file, encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(ch)
-
-    return logger
+def setup_logger(args=None):
+    return setup_simulator_logger("lwm2m", args=args)
 
 
 if sys.platform == "win32":
@@ -235,7 +217,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=5.0, help="Registration timeout in seconds (default: 5.0)")
 
     args = parser.parse_args()
-    logger = setup_logger()
+    logger = setup_logger(args)
 
     if not os.path.isfile(args.jar):
         logger.error(f"[!] Leshan JAR file not found at: {args.jar}")
@@ -300,6 +282,11 @@ def main():
         return format_result("lwm2m", args.mode, STATUS_PROTO_ERROR, f"Execution failed: {e}", stage="init")
     finally:
         cleanup_process(proc, logger, hJob)
+        if os.path.isfile(temp_log):
+            try:
+                os.remove(temp_log)
+            except Exception:
+                pass
 
     raw_output = ""
     if os.path.isfile(temp_log):

@@ -8,6 +8,8 @@ import sys
 import os
 import socket
 import time
+import logging
+from typing import Any, Optional
 
 # Ensure console supports UTF-8 on Windows
 try:
@@ -127,3 +129,130 @@ def tcp_preflight_probe(host: str, port: int, timeout: float = 3.0) -> tuple[boo
                 sock.close()
             except Exception:
                 pass
+
+
+# ─── Standardized Secure Logger Setup with Credential Redaction ───────────────
+
+_SHARED_REDACTOR = None
+
+
+def get_shared_redactor():
+    """Returns singleton Redactor instance loaded with config.yaml secrets."""
+    global _SHARED_REDACTOR
+    if _SHARED_REDACTOR is not None:
+        return _SHARED_REDACTOR
+    try:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if base_dir not in sys.path:
+            sys.path.insert(0, base_dir)
+        from runner.redact import Redactor
+
+        config = None
+        config_path = os.path.join(base_dir, "config", "config.yaml")
+        if os.path.isfile(config_path):
+            try:
+                import yaml
+
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = yaml.safe_load(f)
+            except Exception:
+                pass
+        _SHARED_REDACTOR = Redactor(config=config)
+    except Exception:
+        _SHARED_REDACTOR = None
+    return _SHARED_REDACTOR
+
+
+def register_simulator_args(args: Any) -> None:
+    """Dynamically registers CLI arguments containing credentials into the redaction pool."""
+    r = get_shared_redactor()
+    if r and hasattr(args, "__dict__"):
+        for k, v in vars(args).items():
+            if isinstance(v, str) and any(w in k.lower() for w in ("token", "password", "secret", "psk", "key")):
+                r.add_secret(v)
+
+
+class RedactingFilter(logging.Filter):
+    """
+    Logging filter that redacts credentials in all log messages (record.msg and record.args)
+    before they are emitted to console or log files.
+    """
+
+    def __init__(self, redactor=None):
+        super().__init__()
+        self.redactor = redactor or get_shared_redactor()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if self.redactor:
+            try:
+                if isinstance(record.msg, str):
+                    record.msg = self.redactor.redact_text(record.msg)
+                if record.args:
+                    if isinstance(record.args, dict):
+                        record.args = self.redactor.redact_data(record.args)
+                    elif isinstance(record.args, (tuple, list)):
+                        record.args = tuple(self.redactor.redact_data(a) for a in record.args)
+                if record.exc_text:
+                    record.exc_text = self.redactor.redact_text(record.exc_text)
+            except Exception:
+                pass
+        return True
+
+
+class RedactingFormatter(logging.Formatter):
+    """
+    Logging formatter that redacts credentials from the fully formatted message.
+    """
+
+    def __init__(self, fmt=None, datefmt=None, redactor=None):
+        super().__init__(fmt, datefmt)
+        self.redactor = redactor or get_shared_redactor()
+
+    def format(self, record: logging.LogRecord) -> str:
+        s = super().format(record)
+        if self.redactor:
+            s = self.redactor.redact_text(s)
+        return s
+
+
+def setup_simulator_logger(proto: str, log_filename: Optional[str] = None, args: Any = None) -> logging.Logger:
+    """
+    Standardized, secure logger setup for all simulators in sim/*.py.
+    Applies RedactingFilter and RedactingFormatter so that NO credentials appear
+    in logs/<proto>.log or stdout.
+    """
+    if args is not None:
+        register_simulator_args(args)
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_dir = os.path.join(base_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    if not log_filename:
+        log_filename = f"{proto}.log"
+    log_file = os.path.join(log_dir, log_filename)
+
+    logger = logging.getLogger(f"{proto}_sim")
+    logger.setLevel(logging.DEBUG)
+
+    redactor = get_shared_redactor()
+    redacting_filter = RedactingFilter(redactor=redactor)
+    logger.addFilter(redacting_filter)
+
+    # Avoid duplicate handlers if setup_logger called multiple times
+    if not logger.handlers:
+        file_formatter = RedactingFormatter("%(asctime)s [%(levelname)s] %(message)s", redactor=redactor)
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(file_formatter)
+        fh.addFilter(redacting_filter)
+        logger.addHandler(fh)
+
+        stream_formatter = RedactingFormatter("%(message)s", redactor=redactor)
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(stream_formatter)
+        ch.addFilter(redacting_filter)
+        logger.addHandler(ch)
+
+    return logger
+

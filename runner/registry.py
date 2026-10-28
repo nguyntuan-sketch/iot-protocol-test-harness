@@ -1,4 +1,5 @@
 """
+
 Runner Registry Module
 Manages CLI definitions, capability discovery, and command-line construction.
 """
@@ -500,12 +501,23 @@ def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.
     return info
 
 
-def print_payload_info(proto: str, config: dict, target_host: str = "127.0.0.1", mode: str = "send") -> None:
+def print_payload_info(
+    proto: str,
+    config: dict,
+    target_host: str = "127.0.0.1",
+    mode: str = "send",
+    redactor: Optional[Any] = None,
+) -> None:
     """
     Prints formatted message and payload structure to console.
     """
     info = get_protocol_payload_info(proto, config, target_host, mode)
+    if redactor:
+        info = redactor.redact_data(info)
+
     print(f"  +--- [BẢN TIN {proto.upper()}] ---")
+    if mode == "connect":
+        print("  | [LƯU Ý]: (chế độ connect không gửi bản tin; đây là bản tin MẪU sẽ gửi ở chế độ send/both)")
     print(f"  | Vận chuyển : {info['transport']}")
     print(f"  | Đích đến   : {info['target']}")
     if info.get("headers"):

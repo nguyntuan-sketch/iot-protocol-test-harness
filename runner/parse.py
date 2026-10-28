@@ -5,7 +5,7 @@ Parses RESULT lines, validates exit codes, and extracts protocol status and diag
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from runner.execute import ExecutionResult
 
 EXPECTED_EXIT_MAP = {
@@ -40,6 +40,7 @@ def parse_cli_output(
     target_host: Optional[str] = None,
     initial_notes: Optional[List[str]] = None,
     log_file: str = "",
+    redactor: Optional[Any] = None,
 ) -> ParsedResult:
     """
     Parses the raw output from a CLI execution into a structured ParsedResult.
@@ -47,15 +48,16 @@ def parse_cli_output(
     notes = list(initial_notes or [])
 
     if exec_res.timed_out:
+        detail_msg = "Quá hạn thời gian (timeout cứng bị ngắt bởi runner)"
         return ParsedResult(
             proto=proto_name,
             mode=mode,
             status="RUNNER_TIMEOUT",
             exit_code=-1,
             elapsed=exec_res.elapsed,
-            detail=f"Quá hạn thời gian (timeout cứng bị ngắt bởi runner)",
-            notes=notes,
-            raw_cmd=exec_res.cmd_str,
+            detail=redactor.redact_text(detail_msg) if redactor else detail_msg,
+            notes=[redactor.redact_text(n) for n in notes] if redactor else notes,
+            raw_cmd=redactor.redact_text(exec_res.cmd_str) if redactor else exec_res.cmd_str,
             log_file=log_file,
         )
 
@@ -86,9 +88,9 @@ def parse_cli_output(
             status="NO_RESULT_LINE",
             exit_code=exec_res.returncode,
             elapsed=exec_res.elapsed,
-            detail=last_err[:200],
-            notes=notes,
-            raw_cmd=exec_res.cmd_str,
+            detail=redactor.redact_text(last_err[:200]) if redactor else last_err[:200],
+            notes=[redactor.redact_text(n) for n in notes] if redactor else notes,
+            raw_cmd=redactor.redact_text(exec_res.cmd_str) if redactor else exec_res.cmd_str,
             log_file=log_file,
         )
 
@@ -144,14 +146,18 @@ def parse_cli_output(
     if target_host and target_host.lower() == "localhost":
         notes.append("khuyên dùng 127.0.0.1")
 
+    final_detail = redactor.redact_text(detail) if redactor else detail
+    final_notes = [redactor.redact_text(n) for n in notes] if redactor else notes
+    final_raw_cmd = redactor.redact_text(exec_res.cmd_str) if redactor else exec_res.cmd_str
+
     return ParsedResult(
         proto=proto_name,
         mode=mode,
         status=status,
         exit_code=exec_res.returncode,
         elapsed=exec_res.elapsed,
-        detail=detail,
-        notes=notes,
-        raw_cmd=exec_res.cmd_str,
+        detail=final_detail,
+        notes=final_notes,
+        raw_cmd=final_raw_cmd,
         log_file=log_file,
     )

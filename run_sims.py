@@ -34,6 +34,7 @@ from runner.registry import (
     print_payload_info,
 )
 from runner.parse import parse_cli_output, ParsedResult
+from runner.redact import Redactor
 from runner.report import (
     print_console_table,
     write_results_json,
@@ -175,6 +176,7 @@ Ví dụ sử dụng:
 def main():
     args = parse_args()
     config = load_config("config/config.yaml")
+    redactor = Redactor(config=config, custom_args=args.custom_args)
 
     # Target host determination & Advisory
     target_host = args.host if args.host else config.get("global", {}).get("target_host", "127.0.0.1")
@@ -252,10 +254,12 @@ def main():
                 continue
 
             cmd, notes = build_cli_command(entry, args, config, cwd=".", custom_args_map=custom_args_map)
+            redactor.add_from_cmd(cmd)
             notes_str = f" [{'; '.join(notes)}]" if notes else ""
-            print(f"[DRY-RUN] {entry.name:<10} (nhóm: {entry.group:<8}): {' '.join(cmd)}{notes_str}")
+            cmd_display = redactor.redact_text(' '.join(cmd))
+            print(f"[DRY-RUN] {entry.name:<10} (nhóm: {entry.group:<8}): {cmd_display}{notes_str}")
             if args.show_payload:
-                print_payload_info(entry.name, config, target_host, args.mode)
+                print_payload_info(entry.name, config, target_host, args.mode, redactor=redactor)
         print("\n" + MANDATORY_NOTICE + "\n")
         sys.exit(0)
 
@@ -292,6 +296,7 @@ def main():
             continue
 
         cmd, notes = build_cli_command(entry, args, config, cwd=".", custom_args_map=custom_args_map)
+        redactor.add_from_cmd(cmd)
         log_file = os.path.join(run_dir, f"{entry.name}.txt")
 
         # Determine grace
@@ -302,15 +307,17 @@ def main():
         if entry.name in adapters_cfg and isinstance(adapters_cfg[entry.name], dict) and "port" in adapters_cfg[entry.name]:
             proto_port = adapters_cfg[entry.name]["port"]
 
-        print(f"[{entry.name.upper()}] Đang chạy: {' '.join(cmd)}")
+        cmd_display = redactor.redact_text(' '.join(cmd))
+        print(f"[{entry.name.upper()}] Đang chạy: {cmd_display}")
         if args.show_payload:
-            print_payload_info(entry.name, config, target_host, args.mode)
+            print_payload_info(entry.name, config, target_host, args.mode, redactor=redactor)
         exec_res = execute_cli(
             cmd=cmd,
             timeout=args.timeout,
             grace=grace_to_use,
             cwd=".",
             out_file=log_file,
+            redactor=redactor,
         )
 
         parsed = parse_cli_output(
@@ -321,6 +328,7 @@ def main():
             target_host=target_host,
             initial_notes=notes,
             log_file=log_file,
+            redactor=redactor,
         )
         results.append(parsed)
 
@@ -344,8 +352,8 @@ def main():
         "run_dir": run_dir,
         "show_payload": args.show_payload,
     }
-    write_results_json(results, json_path, meta, config=config)
-    write_results_md(results, md_path, meta, config=config)
+    write_results_json(results, json_path, meta, config=config, redactor=redactor)
+    write_results_md(results, md_path, meta, config=config, redactor=redactor)
     print(f"[*] Báo cáo đã lưu: {json_path}")
     print(f"[*] Báo cáo đã lưu: {md_path}")
 

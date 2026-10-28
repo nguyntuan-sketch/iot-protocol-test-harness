@@ -106,35 +106,42 @@ def write_results_json(
     filepath: str,
     meta: Dict[str, Any],
     config: Optional[Dict[str, Any]] = None,
+    redactor: Optional[Any] = None,
 ) -> None:
-    """Saves structured execution results as JSON."""
+    """Saves structured execution results as JSON (with credential redaction)."""
     from runner.registry import get_protocol_payload_info
 
     os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
     cfg = config or {}
     show_payload = meta.get("show_payload", False)
 
+    results_data = []
+    for r in results:
+        payload_info = None
+        if show_payload:
+            payload_info = get_protocol_payload_info(r.proto, cfg, meta.get("target_host", "127.0.0.1"), r.mode)
+            if r.mode == "connect":
+                payload_info["notice"] = "(chế độ connect không gửi bản tin; đây là bản tin MẪU sẽ gửi ở chế độ send/both)"
+            if redactor:
+                payload_info = redactor.redact_data(payload_info)
+
+        item = {
+            "proto": r.proto,
+            "mode": r.mode,
+            "status": r.status,
+            "exit_code": r.exit_code,
+            "elapsed": r.elapsed,
+            "detail": redactor.redact_text(r.detail) if redactor else r.detail,
+            "notes": [redactor.redact_text(n) for n in r.notes] if redactor else r.notes,
+            "raw_cmd": redactor.redact_text(r.raw_cmd) if redactor else r.raw_cmd,
+            "log_file": r.log_file,
+            "payload_info": payload_info,
+        }
+        results_data.append(item)
+
     data = {
-        "metadata": meta,
-        "results": [
-            {
-                "proto": r.proto,
-                "mode": r.mode,
-                "status": r.status,
-                "exit_code": r.exit_code,
-                "elapsed": r.elapsed,
-                "detail": r.detail,
-                "notes": r.notes,
-                "raw_cmd": r.raw_cmd,
-                "log_file": r.log_file,
-                "payload_info": (
-                    get_protocol_payload_info(r.proto, cfg, meta.get("target_host", "127.0.0.1"), r.mode)
-                    if show_payload
-                    else None
-                ),
-            }
-            for r in results
-        ],
+        "metadata": redactor.redact_data(meta) if redactor else meta,
+        "results": results_data,
     }
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
@@ -145,19 +152,22 @@ def write_results_md(
     filepath: str,
     meta: Dict[str, Any],
     config: Optional[Dict[str, Any]] = None,
+    redactor: Optional[Any] = None,
 ) -> None:
-    """Saves summary report as GitHub-flavored Markdown."""
+    """Saves summary report as GitHub-flavored Markdown (with credential redaction)."""
     from runner.registry import get_protocol_payload_info
 
     os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
     counts = Counter(r.status for r in results)
     total = len(results)
 
+    meta_target = redactor.redact_text(str(meta.get("target_host", "-"))) if redactor else meta.get("target_host", "-")
+
     lines = [
         "# Báo Cáo Chạy Gộp Simulators (`run_sims.py`)\n",
         f"- **Thời gian chạy:** {meta.get('timestamp', '-')}",
         f"- **Chế độ:** `{meta.get('mode', '-')}`",
-        f"- **Mục tiêu (Host):** `{meta.get('target_host', '-')}`",
+        f"- **Mục tiêu (Host):** `{meta_target}`",
         f"- **Timeout cấu hình:** `{meta.get('timeout', '-')}s`",
         f"- **Thư mục log chi tiết:** `{meta.get('run_dir', '-')}`\n",
         "## 1. Bảng Kết Quả Thực Thi\n",
@@ -166,7 +176,10 @@ def write_results_md(
     ]
 
     for r in results:
-        detail_esc = format_detail_column(r, 120).replace("|", "\\|")
+        detail_text = format_detail_column(r, 120)
+        if redactor:
+            detail_text = redactor.redact_text(detail_text)
+        detail_esc = detail_text.replace("|", "\\|")
         exit_str = str(r.exit_code) if r.exit_code != -1 else "-"
         lines.append(
             f"| `{r.proto}` | `{r.mode}` | **{r.status}** | `{exit_str}` | `{r.elapsed:.2f}s` | {detail_esc} |"
@@ -186,8 +199,13 @@ def write_results_md(
     if meta.get("show_payload"):
         cfg = config or {}
         lines.append("## 4. Chi Tiết Cấu Trúc Bản Tin Đã Gửi\n")
+        if meta.get("mode") == "connect":
+            lines.append("> [!NOTE]")
+            lines.append("> **(chế độ connect không gửi bản tin; đây là bản tin MẪU sẽ gửi ở chế độ send/both)**\n")
         for r in results:
             info = get_protocol_payload_info(r.proto, cfg, meta.get("target_host", "127.0.0.1"), r.mode)
+            if redactor:
+                info = redactor.redact_data(info)
             lines.append(f"### {r.proto.upper()} ({info['transport']})")
             lines.append(f"- **Đích đến:** `{info['target']}`")
             if info.get("headers"):
@@ -200,6 +218,10 @@ def write_results_md(
                 lines.append(json.dumps(info["payload"], indent=2, ensure_ascii=False))
                 lines.append("```\n")
 
+    content = "\n".join(lines)
+    if redactor:
+        content = redactor.redact_text(content)
+
     with open(filepath, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+        f.write(content)
 

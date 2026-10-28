@@ -34,14 +34,14 @@ except ImportError:
 # Import common utilities
 try:
     from sim.common import (
-        format_result,
+        format_result, setup_simulator_logger,
         STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
         EXIT_OK, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED, EXIT_PROTO_ERROR
     )
 except ImportError:
     # Fallback if run standalone from root
     from common import (
-        format_result,
+        format_result, setup_simulator_logger,
         STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
         EXIT_OK, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED, EXIT_PROTO_ERROR
     )
@@ -84,27 +84,8 @@ def get_default_config():
     return cfg
 
 
-def setup_logger():
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    log_dir = os.path.join(base_dir, "logs")
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, "http.log")
-
-    logger = logging.getLogger("http_sim")
-    logger.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-
-    fh = logging.FileHandler(log_file, encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(formatter)
-    logger.addHandler(fh)
-
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(ch)
-
-    return logger
+def setup_logger(args=None):
+    return setup_simulator_logger("http", args=args)
 
 
 def build_http_target(args, cfg):
@@ -308,7 +289,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=3.0, help="HTTP request timeout in seconds (default: 3.0)")
 
     args = parser.parse_args()
-    logger = setup_logger()
+    logger = setup_logger(args)
 
     if args.port is None:
         args.port = cfg["port_tls"] if args.tls else cfg["port"]

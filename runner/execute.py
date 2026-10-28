@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from typing import List, Optional, Set
+from typing import Any, List, Optional, Set
 
 if sys.platform == "win32":
     from ctypes import wintypes
@@ -140,13 +140,14 @@ def execute_cli(
     grace: float,
     cwd: str,
     out_file: str,
+    redactor: Optional[Any] = None,
 ) -> ExecutionResult:
     """
     Executes a single CLI simulator using subprocess.Popen.
     Attaches the process to a Windows Job Object with KILL_ON_CLOSE to guarantee
     all descendant processes (like Java JVM launched by LwM2M wrapper) are cleanly reaped.
     Enforces a hard timeout (timeout + grace).
-    Saves raw stdout/stderr to out_file.
+    Saves raw stdout/stderr to out_file (redacting credentials before writing).
     """
     abs_out_file = os.path.abspath(os.path.join(cwd, out_file))
     os.makedirs(os.path.dirname(abs_out_file), exist_ok=True)
@@ -217,17 +218,22 @@ def execute_cli(
 
     elapsed = round(time.time() - t0, 3)
 
-    # Save raw log output
+    raw_cmd_str = " ".join(cmd)
+    logged_cmd = redactor.redact_text(raw_cmd_str) if redactor else raw_cmd_str
+    logged_stdout = redactor.redact_text(stdout or "") if redactor else (stdout or "")
+    logged_stderr = redactor.redact_text(stderr or "") if redactor else (stderr or "")
+
+    # Save raw log output (redacted)
     try:
         with open(abs_out_file, "w", encoding="utf-8") as f:
-            f.write(f"COMMAND: {' '.join(cmd)}\n")
+            f.write(f"COMMAND: {logged_cmd}\n")
             f.write(f"ELAPSED: {elapsed}s\n")
             f.write(f"TIMED_OUT: {timed_out}\n")
             f.write(f"RETURNCODE: {returncode}\n\n")
             f.write("=== STDOUT ===\n")
-            f.write(stdout or "")
+            f.write(logged_stdout)
             f.write("\n\n=== STDERR ===\n")
-            f.write(stderr or "")
+            f.write(logged_stderr)
     except Exception:
         pass
 
@@ -237,5 +243,5 @@ def execute_cli(
         stderr=stderr or "",
         elapsed=elapsed,
         timed_out=timed_out,
-        cmd_str=" ".join(cmd),
+        cmd_str=logged_cmd,
     )

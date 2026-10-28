@@ -563,3 +563,5 @@ iot-protocol-test-harness/
    - Luôn chạy `python run_sims.py --dry-run` trước để kiểm tra danh sách lệnh và tham số.
    - Luôn chạy `python run_sims.py --mode connect` trước để xác minh toàn bộ các cổng dịch vụ đã sẵn sàng tiếp nhận kết nối.
    - Sau khi các cổng đã báo `OK`, mới tiến hành chạy `--mode send` để kiểm thử truyền nhận dữ liệu.
+5. **Bảo mật file log cục bộ (`logs/`):**
+   Khi chạy riêng lẻ từng CLI trong `sim/`, các simulator có thể ghi log trực tiếp ra các file `logs/<proto>.log` (ví dụ `logs/http.log`, `logs/mqtt.log`...). Các file log cục bộ này có thể chứa thông tin access token hoặc thông tin xác thực chưa được che. Tuyệt đối không chia sẻ hoặc commit công khai thư mục `logs/`. Bộ điều phối `run_sims.py` đã tự động che toàn diện credential (thay bằng `***`) trên console, báo cáo `results.json`, `results.md` và các file log thực thi `logs/runs/<thời_điểm>/<proto>.txt`.
