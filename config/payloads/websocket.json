@@ -1,0 +1,34 @@
+{
+  "interval": 1.0,
+  "count": 3,
+  "device_ids": [
+    "ws_dev_01",
+    "ws_dev_02"
+  ],
+  "attributes": [
+    {
+      "fieldName": "temperature",
+      "type": "double",
+      "value": null,
+      "min": 18.0,
+      "max": 32.0
+    },
+    {
+      "fieldName": "battery",
+      "type": "long",
+      "value": null,
+      "min": 20,
+      "max": 100
+    },
+    {
+      "fieldName": "charging",
+      "type": "string",
+      "value": [
+        "true",
+        "false"
+      ],
+      "min": null,
+      "max": null
+    }
+  ]
+}

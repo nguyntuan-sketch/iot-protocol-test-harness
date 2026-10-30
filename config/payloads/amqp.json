@@ -1,0 +1,14 @@
+{
+  "interval": 2,
+  "count": 5,
+  "device_ids": [
+    "amqp_dev_01",
+    "amqp_dev_02"
+  ],
+  "attributes": [
+    { "fieldName": "voltage", "type": "double", "value": null, "min": 210.0, "max": 240.0 },
+    { "fieldName": "current", "type": "double", "value": null, "min": 0.5, "max": 15.0 },
+    { "fieldName": "mode", "type": "string", "value": ["NORMAL", "ECO", "OVERLOAD"], "min": null, "max": null }
+  ]
+}
+

@@ -14,3 +14,11 @@ __pycache__/
 venv/
 .idea/
 .vscode/
+
+# Local configuration overrides (secrets)
+config/config.local.yaml
+
+# Temporary canary & test files
+canary_pw.txt
+test_*.py
+*.log

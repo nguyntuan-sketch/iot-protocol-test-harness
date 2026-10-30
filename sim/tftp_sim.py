@@ -30,8 +30,9 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result, classify_socket_error
-, setup_simulator_logger)
+    format_result, classify_socket_error, setup_simulator_logger,
+    load_payload_config, run_devices_parallel
+)
 
 try:
     import yaml
@@ -127,29 +128,34 @@ def do_upload(args, logger):
         logger.error(f"[!] Upload file not found: {args.file}")
         return format_result("tftp", "send", STATUS_PROTO_ERROR, f"File not found: {args.file}", stage="init")
 
-    file_size = os.path.getsize(args.file)
-    remote_filename = os.path.basename(args.file)
-    logger.info(f"[*] [TFTP UPLOAD] Target: {args.host}:{args.port} | File: {args.file} ({file_size} bytes)")
+    payload_cfg = load_payload_config("tftp", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or ["sim_tftp_001"]
+    else:
+        device_ids = ["sim_tftp_001"]
 
-    # Note: On Windows, tftpy lockfile() has a known bug where it seeks to EOF to get file length
-    # without seeking back, causing 0-byte uploads when flock=True. Use flock=False.
-    client = tftpy.TftpClient(args.host, args.port, flock=False)
-    try:
+    file_size = os.path.getsize(args.file)
+    logger.info(f"[*] [TFTP UPLOAD] Target: {args.host}:{args.port} | File: {args.file} ({file_size}B) | Devices: {len(device_ids)}")
+
+    def upload_tftp_device(dev_id: str, dev_logger) -> str:
+        remote_filename = f"{dev_id}_{os.path.basename(args.file)}"
+        dev_logger.info(f"[*] [DEVICE {dev_id}] Uploading {args.file} as '{remote_filename}'...")
+        client = tftpy.TftpClient(args.host, args.port, flock=False)
         t0 = time.time()
         client.upload(remote_filename, args.file)
         elapsed = round(time.time() - t0, 3)
-        logger.info(f"[{datetime.now().isoformat()}] <--- [TFTP UPLOAD OK] Transferred {file_size} bytes in {elapsed}s to {args.host}:{args.port}/{remote_filename}")
-        return format_result("tftp", "send", STATUS_OK, f"Transferred {file_size} bytes in {elapsed}s", stage="channel")
-    except tftpy.TftpException as te:
-        logger.error(f"[!] TFTP Protocol Error: {te}")
-        return format_result("tftp", "send", STATUS_PROTO_ERROR, f"TftpException: {te}", stage="channel")
-    except (ConnectionResetError, OSError) as oe:
-        status, detail, code = classify_socket_error(oe, stage="upload")
-        logger.error(f"[!] Cannot upload to TFTP Server at {args.host}:{args.port}: {oe}")
-        return format_result("tftp", "send", status, detail)
-    except Exception as e:
-        logger.error(f"[!] Unexpected error during TFTP upload: {e}")
-        return format_result("tftp", "send", STATUS_PROTO_ERROR, f"Upload error: {e}", stage="channel")
+        dev_logger.info(f"[{datetime.now().isoformat()}] <--- [DEVICE {dev_id}] [TFTP UPLOAD OK] Transferred {file_size} bytes in {elapsed}s to {remote_filename}")
+        return STATUS_OK, f"{file_size}B in {elapsed}s"
+
+    return run_devices_parallel(
+        "tftp",
+        "send",
+        device_ids,
+        upload_tftp_device,
+        timeout_per_device=args.timeout + 5.0,
+        args=args,
+        logger=logger,
+    )
 
 
 def do_download_listen(args, logger):
@@ -175,7 +181,7 @@ def main():
     cfg = get_default_config()
     parser = argparse.ArgumentParser(
         description="TFTP IoT Protocol Simulator CLI (tftpy)",
-        epilog="Chế độ 'connect' gửi probe RRQ (unconnected socket) để kiểm tra TFTP daemon phản hồi từ TID khác. Không hỗ trợ TLS."
+        epilog="Chế độ 'connect' gửi probe RRQ (unconnected socket) để kiểm tra TFTP daemon phản hồi từ TID khác. Không hỗ trợ TLS. Lưu ý: TFTP không có xác thực ở tầng giao thức (RFC 1350)."
     )
     parser.add_argument("--mode", choices=["connect", "send", "listen", "both"], default="connect",
                         help="Operating mode: 'connect', 'send' (upload), 'listen' (download), or 'both' (default: connect)")

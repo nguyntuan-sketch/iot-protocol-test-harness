@@ -42,8 +42,8 @@ class CLIEntry:
 
 def get_default_registry() -> List[CLIEntry]:
     """
-    Returns the standard 12-item registry for all 11 protocol simulators
-    (with tcp_udp split into tcp and udp).
+    Returns the standard 13-item registry for all 13 protocol targets
+    (12 simulator CLIs, with tcp_udp split into tcp and udp).
     """
     return [
         CLIEntry(
@@ -132,6 +132,13 @@ def get_default_registry() -> List[CLIEntry]:
             grace=5.0,
             default_port=69,
         ),
+        CLIEntry(
+            name="ftp",
+            script="sim/ftp_sim.py",
+            group="port21",
+            grace=5.0,
+            default_port=21,
+        ),
     ]
 
 
@@ -163,9 +170,7 @@ def detect_supported_flags(python_exe: str, script_path: str, cwd: str = ".") ->
         )
         help_text = (proc.stdout or "") + " " + (proc.stderr or "")
         found_flags = set(re.findall(r"(--[a-zA-Z0-9-]+)", help_text))
-        for flag in CHECK_FLAGS:
-            if flag in found_flags:
-                supported.add(flag)
+        supported = found_flags
     except Exception:
         pass
 
@@ -262,6 +267,29 @@ def build_cli_command(
     if getattr(args, "duration", None) is not None and "--duration" in supported:
         cmd.extend(["--duration", str(args.duration)])
 
+    # 4.1 Safety write barrier for TFTP / FTP
+    if entry.name in ("tftp", "ftp") and args.mode in ("send", "both"):
+        if getattr(args, "allow_write", False) and "--allow-write" in supported:
+            cmd.append("--allow-write")
+
+    # 4.2 Negative test auth-case handling
+    if getattr(args, "auth_case", "valid") == "wrong":
+        neg = config.get("negative_cases", {})
+        inv_token = neg.get("invalid_token", "INVALID_TOKEN_TEST_XYZ")
+        inv_pwd = neg.get("invalid_password", "WRONG_PASSWORD_XYZ")
+        if entry.name == "http" and "--header-value" in supported:
+            cmd.extend(["--header-value", inv_token])
+            notes.append("auth-case: wrong")
+        elif entry.name == "websocket" and "--header-value" in supported:
+            cmd.extend(["--header-value", inv_token])
+            notes.append("auth-case: wrong")
+        elif entry.name in ("mqtt", "ftp", "amqp", "xmpp") and "--password" in supported:
+            cmd.extend(["--password", inv_pwd])
+            notes.append("auth-case: wrong")
+        elif entry.name == "coap" and "--token" in supported:
+            cmd.extend(["--token", inv_token])
+            notes.append("auth-case: wrong")
+
     # 5. Extra predefined args (e.g. --transport tcp)
     if entry.extra_args:
         cmd.extend(entry.extra_args)
@@ -273,7 +301,13 @@ def build_cli_command(
     return cmd, notes
 
 
-def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.0.0.1", mode: str = "send") -> Dict[str, Any]:
+def get_protocol_payload_info(
+    proto: str,
+    config: dict,
+    target_host: str = "127.0.0.1",
+    mode: str = "send",
+    custom_args_map: Optional[Dict[str, List[str]]] = None,
+) -> Dict[str, Any]:
     """
     Returns structured information about the message and payload sent by the simulator.
     """
@@ -297,17 +331,79 @@ def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.
         port = cfg.get("port", 8080)
         path = cfg.get("path", "/api/v1/telemetry")
         token = cfg.get("access_token", "test_token_http")
+        auth_cfg = cfg.get("auth", {})
         info["transport"] = "HTTP POST (REST)"
         info["target"] = f"http://{target_host}:{port}{path}"
-        info["headers"] = {"Content-Type": "application/json", "X-Authorization": f"Bearer {token}"}
+
+        h_key = auth_cfg.get("header_key", "")
+        h_val = auth_cfg.get("header_value", "")
+        if not h_val and auth_cfg.get("header_value_env"):
+            h_val = os.environ.get(auth_cfg["header_value_env"], "")
+
+        if custom_args_map and "http" in custom_args_map:
+            tokens = custom_args_map["http"]
+            for i, tok in enumerate(tokens):
+                if tok == "--header-key" and i + 1 < len(tokens):
+                    h_key = tokens[i + 1]
+                elif tok.startswith("--header-key="):
+                    h_key = tok[13:]
+                elif tok == "--header-value" and i + 1 < len(tokens):
+                    h_val = tokens[i + 1]
+                elif tok.startswith("--header-value="):
+                    h_val = tok[15:]
+                elif tok == "--token" and i + 1 < len(tokens):
+                    token = tokens[i + 1]
+                elif tok.startswith("--token="):
+                    token = tok[8:]
+
+        headers = {"Content-Type": "application/json"}
+        if h_key and h_val:
+            headers[h_key] = h_val
+        else:
+            headers["X-Authorization"] = f"Bearer {token}"
+
+        extra = auth_cfg.get("extra_headers", {})
+        if isinstance(extra, dict):
+            headers.update(extra)
+
+        if custom_args_map and "http" in custom_args_map:
+            tokens = custom_args_map["http"]
+            for i, tok in enumerate(tokens):
+                if tok == "--header" and i + 1 < len(tokens):
+                    kv = tokens[i + 1]
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        headers[k.strip('"\',` ')] = v.strip('"\',` ')
+                elif tok.startswith("--header="):
+                    kv = tok[9:]
+                    if "=" in kv:
+                        k, v = kv.split("=", 1)
+                        headers[k.strip('"\',` ')] = v.strip('"\',` ')
+
+        info["headers"] = headers
         info["format"] = "JSON"
-        info["payload"] = {
-            "device_id": device_id,
-            "seq": 1,
-            "temperature": 25.5,
-            "humidity": 59.8,
-            "timestamp": 1793156222891,
-        }
+        try:
+            from sim.common import load_payload_config, generate_payload
+            p_cfg = load_payload_config("http")
+            if p_cfg and "attributes" in p_cfg:
+                d_id = p_cfg.get("device_ids", [device_id])[0]
+                info["payload"] = generate_payload(p_cfg["attributes"], device_id=d_id, seq=1)
+            else:
+                info["payload"] = {
+                    "device_id": device_id,
+                    "seq": 1,
+                    "temperature": 25.5,
+                    "humidity": 59.8,
+                    "timestamp": 1793156222891,
+                }
+        except Exception:
+            info["payload"] = {
+                "device_id": device_id,
+                "seq": 1,
+                "temperature": 25.5,
+                "humidity": 59.8,
+                "timestamp": 1793156222891,
+            }
         info["description"] = "Bản tin HTTP POST gửi dữ liệu cảm biến dạng JSON tới platform REST API"
 
     elif proto == "mqtt":
@@ -318,14 +414,30 @@ def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.
         info["target"] = f"mqtt://{target_host}:{port} -> topic: '{topic}'"
         info["headers"] = {"client_id": cfg.get("client_id", "iot_test_client_001"), "qos": cfg.get("qos", 1)}
         info["format"] = "JSON"
-        info["payload"] = {
-            "device_id": device_id,
-            "seq": 1,
-            "temperature": 26.8,
-            "humidity": 54.9,
-            "status": "ONLINE",
-            "timestamp": 1793156222891,
-        }
+        try:
+            from sim.common import load_payload_config, generate_payload
+            p_cfg = load_payload_config("mqtt")
+            if p_cfg and "attributes" in p_cfg:
+                d_id = p_cfg.get("device_ids", [device_id])[0]
+                info["payload"] = generate_payload(p_cfg["attributes"], device_id=d_id, seq=1)
+            else:
+                info["payload"] = {
+                    "device_id": device_id,
+                    "seq": 1,
+                    "temperature": 26.8,
+                    "humidity": 54.9,
+                    "status": "ONLINE",
+                    "timestamp": 1793156222891,
+                }
+        except Exception:
+            info["payload"] = {
+                "device_id": device_id,
+                "seq": 1,
+                "temperature": 26.8,
+                "humidity": 54.9,
+                "status": "ONLINE",
+                "timestamp": 1793156222891,
+            }
         info["description"] = "Bản tin MQTT Publish telemetry dạng JSON vào telemetry topic"
 
     elif proto == "coap":
@@ -336,13 +448,28 @@ def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.
         info["target"] = f"coap://{target_host}:{port}/{path}"
         info["headers"] = {"code": "0.02 (POST)", "type": "CON", "token": cfg.get("access_token", "test_token_coap")}
         info["format"] = "JSON (encoded UTF-8 bytes)"
-        info["payload"] = {
-            "device_id": device_id,
-            "seq": 1,
-            "temperature": 23.8,
-            "humidity": 64.7,
-            "timestamp": 1793156222891,
-        }
+        try:
+            from sim.common import load_payload_config, generate_payload
+            p_cfg = load_payload_config("coap")
+            if p_cfg and "attributes" in p_cfg:
+                d_id = p_cfg.get("device_ids", [device_id])[0]
+                info["payload"] = generate_payload(p_cfg["attributes"], device_id=d_id, seq=1)
+            else:
+                info["payload"] = {
+                    "device_id": device_id,
+                    "seq": 1,
+                    "temperature": 23.8,
+                    "humidity": 64.7,
+                    "timestamp": 1793156222891,
+                }
+        except Exception:
+            info["payload"] = {
+                "device_id": device_id,
+                "seq": 1,
+                "temperature": 23.8,
+                "humidity": 64.7,
+                "timestamp": 1793156222891,
+            }
         info["description"] = "Bản tin CoAP POST CON mang dữ liệu telemetry dạng JSON"
 
     elif proto == "xmpp":
@@ -442,13 +569,28 @@ def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.
         info["target"] = f"ws://{target_host}:{port}{path}"
         info["headers"] = {"Upgrade": "websocket", "Connection": "Upgrade"}
         info["format"] = "JSON"
-        info["payload"] = {
-            "device_id": device_id,
-            "seq": 1,
-            "temperature": 25.7,
-            "humidity": 51.6,
-            "timestamp": 1793156222891,
-        }
+        try:
+            from sim.common import load_payload_config, generate_payload
+            p_cfg = load_payload_config("websocket")
+            if p_cfg and "attributes" in p_cfg:
+                d_id = p_cfg.get("device_ids", [device_id])[0]
+                info["payload"] = generate_payload(p_cfg["attributes"], device_id=d_id, seq=1)
+            else:
+                info["payload"] = {
+                    "device_id": device_id,
+                    "seq": 1,
+                    "temperature": 25.7,
+                    "humidity": 51.6,
+                    "timestamp": 1793156222891,
+                }
+        except Exception:
+            info["payload"] = {
+                "device_id": device_id,
+                "seq": 1,
+                "temperature": 25.7,
+                "humidity": 51.6,
+                "timestamp": 1793156222891,
+            }
         info["description"] = "Khung truyền WebSocket text frame gửi telemetry dạng JSON"
 
     elif proto == "tcp":
@@ -472,7 +614,7 @@ def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.
         port = cfg.get("udp_port", 9001)
         info["transport"] = "Raw UDP Datagram Socket"
         info["target"] = f"udp://{target_host}:{port}"
-        info["headers"] = {}
+        info["headers"] = {"transport": "UDP datagram", "encoding": "UTF-8"}
         info["format"] = "JSON Datagram"
         info["payload"] = {
             "device_id": device_id,
@@ -498,6 +640,30 @@ def get_protocol_payload_info(proto: str, config: dict, target_host: str = "127.
         }
         info["description"] = "File cấu hình thiết bị mẫu định dạng INI truyền qua các khối TFTP 512B"
 
+    elif proto == "ftp":
+        cfg = adapters.get("ftp", {})
+        port = cfg.get("port", 21)
+        remote_file = cfg.get("remote_filename", "device_telemetry_test.txt")
+        local_file = cfg.get("local_upload_file", "payloads/sample_tftp_file.txt")
+        user = cfg.get("username", "anonymous")
+        pwd = cfg.get("password", "secret")
+        info["transport"] = "FTP Protocol (RFC 959)"
+        info["target"] = f"ftp://{target_host}:{port} -> remote file: '{remote_file}'"
+        info["headers"] = {
+            "user": user,
+            "password": pwd if pwd else "(none)",
+            "mode": "passive",
+            "local_file": local_file,
+        }
+        info["format"] = "Binary / Text Stream (STOR upload)"
+        info["payload"] = {
+            "device_id": device_id,
+            "upload_file": remote_file,
+            "sample_content": "device_id=sim_device_001;temperature=25.5;humidity=60.0",
+            "timestamp": 1793156222891,
+        }
+        info["description"] = "File dữ liệu telemetry mẫu tải lên FTP Server qua lệnh STOR"
+
     return info
 
 
@@ -507,11 +673,12 @@ def print_payload_info(
     target_host: str = "127.0.0.1",
     mode: str = "send",
     redactor: Optional[Any] = None,
+    custom_args_map: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """
     Prints formatted message and payload structure to console.
     """
-    info = get_protocol_payload_info(proto, config, target_host, mode)
+    info = get_protocol_payload_info(proto, config, target_host, mode, custom_args_map=custom_args_map)
     if redactor:
         info = redactor.redact_data(info)
 

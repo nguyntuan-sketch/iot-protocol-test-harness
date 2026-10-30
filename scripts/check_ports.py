@@ -2,7 +2,7 @@
 """
 IoT Protocol Test Harness - Target Ports & External Dependencies Checker
 File: scripts/check_ports.py
-Checks reachability of target ports for all 11 IoT adapters and verifies JAR checksum.
+Checks reachability of target ports for all 12 IoT adapters and verifies JAR checksum.
 """
 import hashlib
 import re
@@ -23,6 +23,7 @@ TARGET_ADAPTERS = [
     ("#10", "TCP Raw",    "TCP", 9000, "Raw TCP Socket listener, Custom parser rule"),
     ("#10", "UDP Raw",    "UDP", 9001, "Raw UDP Socket listener, Custom parser rule"),
     ("#11", "TFTP",       "UDP", 69,   "TFTP Server daemon, Storage folder write permission"),
+    ("#12", "FTP",        "TCP", 21,   "FTP Server daemon (RFC 959), user credentials & storage"),
 ]
 
 def check_tcp_port(host: str, port: int, timeout: float = 0.5) -> str:

@@ -1,21 +1,21 @@
 # IoT Protocol Test Harness & Simulators
 
-Bộ công cụ giả lập phía thiết bị (IoT Device Simulators) độc lập phục vụ kiểm thử tích hợp kết nối cho 11 giao thức IoT phổ biến (12 mục tiêu kiểm thử bao gồm TCP và UDP thô riêng biệt) tới IoT Platform của người dùng.
+Bộ công cụ giả lập phía thiết bị (IoT Device Simulators) độc lập phục vụ kiểm thử tích hợp kết nối cho 13 giao thức IoT phổ biến (13 mục tiêu kiểm thử bao gồm TCP và UDP thô riêng biệt) tới IoT Platform mục tiêu.
 
 ---
 
 ## 1. Giới thiệu
 
-### 1.1. Công cụ này là gì?
-- Là bộ công cụ dòng lệnh (CLI) độc lập đóng vai trò thiết bị IoT (phía Client / Sensor / Gateway), chủ động khởi tạo kết nối, gửi dữ liệu telemetry mẫu và lắng nghe lệnh downlink gửi tới IoT Platform.
-- Hỗ trợ đầy đủ 11 giao thức IoT phổ biến: HTTP, MQTT, CoAP, XMPP, AMQP, DDS, LwM2M, LoRaWAN, WebSocket, TCP thô, UDP thô và TFTP.
-- Đi kèm bộ điều phối chạy gộp [run_sims.py](run_sims.py) giúp kiểm tra tự động toàn bộ 12 mục tiêu kết nối một cách tuần tự, an toàn và tổng hợp báo cáo trực quan.
+### 1.1. Mục đích công cụ
+- Bộ công cụ dòng lệnh (CLI) độc lập đóng vai trò thiết bị IoT (phía Client / Sensor / Gateway), chủ động khởi tạo kết nối, gửi dữ liệu telemetry mẫu và lắng nghe lệnh downlink gửi tới IoT Platform.
+- Hỗ trợ đầy đủ 13 giao thức IoT phổ biến: HTTP, MQTT, CoAP, XMPP, AMQP, DDS, LwM2M, LoRaWAN, WebSocket, TCP thô, UDP thô, TFTP và FTP.
+- Đi kèm bộ điều phối chạy gộp [run_sims.py](run_sims.py) giúp kiểm tra tự động toàn bộ 13 mục tiêu kết nối một cách tuần tự, an toàn và tổng hợp báo cáo trực quan.
 
-### 1.2. Công cụ này KHÔNG phải là gì?
-- **KHÔNG phải là IoT Platform:** Bộ công cụ không lưu trữ dữ liệu, không có cơ sở dữ liệu thời gian thực và không quản lý vòng đời thiết bị.
-- **KHÔNG tự dựng server hay broker giả lập nội bộ:** Các simulator đóng vai trò client kết nối tới IoT Platform thực tế (ngoại lệ duy nhất: file demo server [bin/leshan-server-demo.jar](bin/leshan-server-demo.jar) được cung cấp kèm theo phục vụ kiểm thử LwM2M cục bộ khi cần).
-- **KHÔNG gán nhãn Pass/Fail:** Runner không kết luận Pass/Fail tùy tiện mà phân loại trung thực 5 trạng thái mạng/giao thức: `OK`, `REFUSED`, `TIMEOUT`, `AUTH_FAILED`, `PROTO_ERROR`.
-- **KHÔNG chứng minh dữ liệu đã được lưu trữ:** Trạng thái kết nối thành công chỉ chứng minh tầng mạng và bắt tay giao thức đã hoàn tất; việc dữ liệu có được platform bóc tách, lưu trữ vào cơ sở dữ liệu hay kích hoạt rule-engine hay không cần được kiểm chứng bằng REST API hoặc giao diện quản trị của chính platform đó.
+### 1.2. Giới hạn phạm vi
+- **Không phải là IoT Platform:** Bộ công cụ không lưu trữ dữ liệu, không có cơ sở dữ liệu thời gian thực và không quản lý vòng đời thiết bị.
+- **Không tự dựng server hay broker giả lập nội bộ:** Các simulator đóng vai trò client kết nối tới IoT Platform thực tế (ngoại lệ duy nhất: file demo server [bin/leshan-server-demo.jar](bin/leshan-server-demo.jar) được cung cấp kèm theo phục vụ kiểm thử LwM2M cục bộ khi cần).
+- **Không gán nhãn đạt/không đạt chủ quan:** Runner không kết luận tùy tiện mà phân loại chính xác theo 5 trạng thái mạng/giao thức chuẩn: `OK`, `REFUSED`, `TIMEOUT`, `AUTH_FAILED`, `PROTO_ERROR`.
+- **Không chứng minh dữ liệu đã được lưu trữ:** Trạng thái kết nối thành công chỉ chứng minh tầng mạng và bắt tay giao thức đã hoàn tất; việc dữ liệu có được platform bóc tách, lưu trữ vào cơ sở dữ liệu hay kích hoạt rule-engine hay không cần được kiểm chứng bằng REST API hoặc giao diện quản trị của chính platform đó.
 
 ---
 
@@ -37,17 +37,18 @@ Bảng đối chiếu thông số mặc định từ mã nguồn và cấu hình
 | **TCP thô** | [sim/tcp_udp_sim.py](sim/tcp_udp_sim.py) | 9000 | TCP | `socket` (stdlib) | Hoàn thành bắt tay 3 bước TCP (3-way handshake) tới cổng lắng nghe | Chỉ là bắt tay socket, không chứng minh ứng dụng phía sau hiểu payload. |
 | **UDP thô** | [sim/tcp_udp_sim.py](sim/tcp_udp_sim.py) | 9001 | UDP | `socket` (stdlib) | Gửi datagram thăm dò và nhận được phản hồi từ server | Nếu server im lặng không trả gói sẽ báo TIMEOUT. |
 | **TFTP** | [sim/tftp_sim.py](sim/tftp_sim.py) | 69 | UDP | `tftpy` | Gửi gói RRQ thăm dò file và nhận gói TFTP ERROR hợp lệ (Error Code 1 - File not found) | Chứng minh TFTP daemon đang trực và tuân thủ RFC 1350. |
+| **FTP** | [sim/ftp_sim.py](sim/ftp_sim.py) | 21 (990 nếu FTPS) | TCP | `ftplib` (stdlib) | Kết nối TCP, đọc banner 220 và đăng nhập USER/PASS hoặc ANONYMOUS thành công (RFC 959) | Chế độ send/both yêu cầu cờ --allow-write để tránh ghi đè file lưu trữ. |
 
 ---
 
 ## 3. Yêu cầu hệ thống
 
 - **Hệ điều hành:** Đã kiểm chứng đầy đủ trên Windows 11 (64-bit).
-  * *Lưu ý môi trường Linux/macOS:* Đánh dấu (chưa kiểm chứng). Cơ chế dọn dẹp tiến trình con trong [runner/execute.py](runner/execute.py) hiện tại sử dụng Windows Job Object (`JOBOBJECT_EXTENDED_LIMIT_INFORMATION` với cờ `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) và lệnh `taskkill /T /F`. Khi chạy trên Linux/macOS, người dùng cần điều chỉnh sang quản lý Process Group (`os.killpg`).
+  * *Lưu ý môi trường Linux/macOS:* Đánh dấu (chưa kiểm chứng). Cơ chế dọn dẹp tiến trình con trong [runner/execute.py](runner/execute.py) hiện tại sử dụng Windows Job Object (`JOBOBJECT_EXTENDED_LIMIT_INFORMATION` với cờ `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) và lệnh `taskkill /T /F`. Khi chạy trên Linux/macOS, người vận hành cần điều chỉnh sang quản lý Process Group (`os.killpg`).
 - **Python:** Yêu cầu Python phiên bản 3.10 đến 3.12 (đã kiểm chứng thực tế trên Python 3.12.16 trong môi trường Conda `iot-test`).
 - **Java (cho giao thức LwM2M):** Yêu cầu Java Development Kit (JDK) phiên bản 17 trở lên (đã kiểm chứng trên Oracle OpenJDK 22).
   * *Cảnh báo quan trọng về Java trên Windows:* Tuyệt đối tránh dùng đường dẫn shim mặc định của Oracle (`C:\Program Files\Common Files\Oracle\Java\javapath\java.exe`). Binary shim này khởi chạy một tiến trình con trung gian nhưng không quản lý vòng đời, dễ dẫn đến hiện tượng sót tiến trình `java.exe` nền mồ côi. Cần cài đặt JDK chính thức và trỏ biến môi trường `JAVA_HOME` trực tiếp vào thư mục cài đặt JDK thật.
-- **Docker:** KHÔNG CẦN CÀI ĐẶT DOCKER. Toàn bộ 11 giao thức đều sử dụng thư viện Python thuần hoặc file JAR Java đóng gói độc lập trong thư mục `bin/`.
+- **Docker:** Không bắt buộc cài đặt Docker. Toàn bộ 13 giao thức đều sử dụng thư viện Python thuần hoặc file JAR Java đóng gói độc lập trong thư mục `bin/`.
 
 ---
 
@@ -91,12 +92,12 @@ Thực thi script kiểm tra toàn diện trước khi vận hành:
 
 ### Bước 4: Cách đọc kết quả kiểm tra
 Sau khi chạy xong `setup_environment.ps1`, hệ thống xuất báo cáo gồm 6 phần (41 hạng mục kiểm tra):
-1. **System Prerequisites:** Báo `[PASS]` cho Python, pip, Java. Cảnh báo `[WARN] Docker not installed` là bình thường vì dự án không dùng Docker.
+1. **System Prerequisites:** Kiểm tra Python, pip, Java. Cảnh báo `[WARN] Docker not installed` là bình thường vì dự án không dùng Docker.
 2. **Directory Structure & Required Files:** Xác nhận đủ các thư mục và file cấu hình, payload.
 3. **Python Libraries:** Xác nhận nạp thành công 14 thư viện lõi (`requests`, `paho-mqtt`, `aiocoap`, `slixmpp`, `pika`, `cyclonedds`, `websockets`, `tftpy`, `yaml`, v.v.).
 4. **Group B Tools & Checksums:** Kiểm tra tính toàn vẹn SHA-256 của file `bin/leshan-client-demo.jar` khớp với [bin/VERSIONS.md](bin/VERSIONS.md).
 5. **Target Ports & Reachability:** Quét cổng platform. Trạng thái `UNREACHABLE` hoặc `UNKNOWN (UDP)` là bình thường khi IoT Platform đích chưa được khởi động.
-6. **Tổng kết:** Phải đạt `Passed checks: 41` và `Failed checks: 0`.
+6. **Tổng kết:** Đạt 41 checks thành công và 0 checks thất bại.
 
 ---
 
@@ -109,7 +110,7 @@ File cấu hình trung tâm được chia làm các khối chức năng rõ ràn
 | Tên khối | Các khóa chính | Tình trạng sử dụng trong mã nguồn |
 | :--- | :--- | :--- |
 | `global` | `target_host`, `timeout_sec`, `device_id`, `telemetry_payload` | **Đang được đọc và sử dụng:** `target_host` và `timeout_sec` được `run_sims.py` và các CLI dùng làm giá trị mặc định. |
-| `adapters` | 11 mục: `http`, `mqtt`, `coap`, `xmpp`, `amqp`, `dds`, `lwm2m`, `lorawan`, `websocket`, `tcp_udp`, `tftp` | **Đang được đọc và sử dụng:** Từng simulator trong `sim/` trực tiếp đọc cổng, path, topic, username/password từ khối giao thức tương ứng. |
+| `adapters` | 12 mục: `http`, `mqtt`, `coap`, `xmpp`, `amqp`, `dds`, `lwm2m`, `lorawan`, `websocket`, `tcp_udp`, `tftp`, `ftp` | **Đang được đọc và sử dụng:** Từng simulator trong `sim/` trực tiếp đọc cổng, path, topic, username/password từ khối giao thức tương ứng. |
 | `verification` | `platform_api_url`, `platform_api_token`, `query_timeout_sec` | **Khai báo trước (chưa đọc tự động bởi CLI):** Dùng để cấu hình điểm cuối REST API phục vụ việc viết test suite đối soát dữ liệu trên platform. |
 | `seed_requirements` | `device_id`, `http_token`, `coap_token`, `amqp_exchange`, v.v. | **Khai báo tài liệu:** Bản ghi danh mục dữ liệu khởi tạo (seed data) cần cấu hình trước trên platform. |
 | `tls` | `enabled`, `ca_cert_path`, `client_cert_path`, `ports` | **Khai báo cấu hình:** Danh mục cổng bảo mật và chứng chỉ (các CLI hỗ trợ cờ `--tls` và `--insecure`). |
@@ -120,22 +121,131 @@ File cấu hình trung tâm được chia làm các khối chức năng rõ ràn
 
 ### 5.3. Việc phải làm trước khi chạy lần đầu
 1. **Kiểm tra xung đột cổng 8080:** Chạy lệnh `netstat -ano | findstr :8080`. Nếu phát hiện có tiến trình khác đang chiếm cổng 8080 (ví dụ web server nội bộ), mở [config/config.yaml](config/config.yaml) và sửa cổng của `adapters.http.port` và `adapters.websocket.port` sang đúng cổng của IoT Platform.
-2. **Cập nhật thông tin xác thực:** Điền token thiết bị vào `adapters.http.access_token` và `adapters.coap.access_token`; cập nhật `username`/`password` cho MQTT và AMQP; điền JID hợp lệ cho XMPP.
-3. **Xác nhận kiểu xác thực HTTP:** Mặc định gửi token qua Header (`auth_mode: "header"`). Nếu platform yêu cầu token nằm trên URL query (`/api/v1/{token}/telemetry`), chuyển sang `auth_mode: "url_token"`.
+2. **Cập nhật thông tin xác thực:** Điền token thiết bị vào `adapters.http.access_token` hoặc khối `adapters.http.auth`; cập nhật `username`/`password` cho MQTT, AMQP và FTP; điền JID hợp lệ cho XMPP.
+3. **Xác nhận kiểu xác thực HTTP:** Mặc định hỗ trợ cặp header key/value (`auth.header_key` và `auth.header_value`). Trường hợp dùng token cũ, cấu hình `auth_mode: "header"` hoặc `auth_mode: "url_token"`.
+
+### 5.4. Cấu hình payload thiết bị: `config/payloads/<proto>.json` và cơ chế chạy song song
+
+Hệ thống hỗ trợ nạp động cấu hình payload và danh sách thiết bị cho toàn bộ 13 giao thức từ thư mục `config/payloads/<proto>.json`.
+
+#### 1. Schema cấu hình chung
+```json
+{
+  "interval": 2,
+  "count": 5,
+  "device_ids": [
+    "id-1",
+    "id-2"
+  ],
+  "attributes": [
+    { "fieldName": "temperature", "type": "double", "value": null, "min": 15.0, "max": 35.0 },
+    { "fieldName": "status", "type": "string", "value": ["true", "false"], "min": null, "max": null }
+  ]
+}
+```
+
+- **`interval`**: Chu kỳ gửi tin giữa các lần (giây). Cờ CLI `--interval` có độ ưu tiên cao hơn.
+- **`count`**: Số lượng bản tin gửi trên mỗi thiết bị. Cờ CLI `--count` có độ ưu tiên cao hơn.
+- **`device_ids`**: Danh sách mã định danh thiết bị (`device_id`). Mỗi thiết bị được khởi chạy trên một worker thread riêng biệt song song.
+- **`attributes`**: Danh sách thuộc tính sinh telemetry. Hỗ trợ các kiểu dữ liệu:
+  - `double` / `float`: Sinh số thực ngẫu nhiên làm tròn 2 chữ số thập phân trong đoạn `[min, max]`. Tự động chuẩn hóa nếu `min > max`.
+  - `int` / `long`: Sinh số nguyên ngẫu nhiên trong đoạn `[min, max]`.
+  - `string`: Chọn ngẫu nhiên một phần tử từ mảng chuỗi `value`.
+  - `boolean`: Chọn ngẫu nhiên `true` hoặc `false`.
+  - Cảnh báo tự động: Khi phát hiện 2 phần tử có cùng `fieldName`, hệ thống ghi log cảnh báo kèm cả hai kiểu dữ liệu bị trùng trước khi ghi đè.
+
+#### 2. Cơ chế chạy song song đa thiết bị (`run_devices_parallel`)
+- Mỗi `device_id` chạy trên một thread độc lập với log phân tách theo tiền tố `[device:<id>]`.
+- `max_workers` được giới hạn tối đa `50` (trần an toàn chống cạn kiệt tài nguyên hệ thống). Nếu vượt quá 50 thiết bị, hệ thống in cảnh báo và điều phối tuần tự qua hàng đợi ThreadPool.
+- Tổng hợp trạng thái kết quả tuân theo thứ tự ưu tiên nghiêm ngặt:
+  `AUTH_FAILED > REFUSED > TIMEOUT > PROTO_ERROR > OK`.
+
+#### 3. Quy tắc đặc thù theo từng giao thức
+- **`tftp` / `ftp`**: Giao thức truyền tải file. Không áp dụng `attributes`/`generate_payload()`. Cấu hình áp dụng danh sách `device_ids` để thực hiện tải file song song cho từng thiết bị (`<device_id>_<remote_filename>`).
+- **`dds` / `lorawan`**: Giữ nguyên cấu trúc đóng gói khung truyền chuẩn (CycloneDDS OMG IDL struct `Telemetry`, Semtech UDP Packet Forwarder v2 binary header + JSON `rxpk.data` Base64). Phần dữ liệu cảm biến bên trong được sinh động từ `generate_payload()`.
+- **`lwm2m`**: Wrapper Leshan Client Demo chạy song song qua các tiến trình con Java được quản lý bởi Windows Job Object (KILL_ON_CLOSE), đọc đầu ra qua PIPE trực tiếp.
 
 ---
 
-## 6. Bắt đầu nhanh
+## 6. Cơ chế xác thực và quản lý thông tin bảo mật
 
-Sau khi hoàn tất cài đặt môi trường, quy trình kiểm tra nhanh gồm 4 bước:
+### 6.1. Ma trận tùy chọn xác thực theo giao thức
+
+Tất cả cơ chế xác thực đều ở trạng thái tùy chọn (optional) và mặc định tắt khi không truyền cờ.
+
+| Giao thức | Cơ chế xác thực hỗ trợ | Tham số CLI | Biến môi trường | Ghi chú kỹ thuật |
+| :--- | :--- | :--- | :--- | :--- |
+| **HTTP** | Cặp Header tùy biến (gửi nguyên văn), Token Header cũ, URL Token | `--header-key KEY`<br>`--header-value VALUE`<br>`--header "KEY=VAL"`<br>`--token TOKEN` | `--header-value-env NAME` | Giá trị `--header-value` gửi NGUYÊN VĂN, không tự thêm tiền tố `Bearer `. 401/403 trả về `AUTH_FAILED`. |
+| **MQTT** | Username/Password, Token trong Username | `--username USER`<br>`--password PASS`<br>`--password-file PATH` | `--username-env NAME`<br>`--password-env NAME` | Cho phép mật khẩu rỗng (khi token đặt tại username). CONNACK reason 4, 5, 134, 135 phân loại thành `AUTH_FAILED`. |
+| **FTP** | Username/Password, Anonymous, FTPS | `--username USER`<br>`--password PASS`<br>`--anonymous`<br>`--tls`<br>`--ca-cert PATH` | Đọc từ config hoặc cờ CLI | RFC 959 USER/PASS. Phản hồi 530 Not logged in phân loại thành `AUTH_FAILED`. |
+| **WebSocket** | Custom Handshake Headers (như HTTP) | `--header-key KEY`<br>`--header-value VALUE`<br>`--header "KEY=VAL"` | `--header-value-env NAME` | Bắt tay thất bại với mã HTTP 401/403 phân loại thành `AUTH_FAILED`. |
+| **AMQP** | Plain SASL Credentials | `--username USER`<br>`--password PASS`<br>`--password-file PATH` | `--username-env NAME`<br>`--password-env NAME` | Bắt tay kết nối RabbitMQ / AMQP 0-9-1. |
+| **XMPP** | SASL Authentication | `--password PASS`<br>`--password-file PATH` | `--password-env NAME` | Xác thực SASL với XMPP Server. JID lấy từ config hoặc `--jid`. |
+| **CoAP** | Token nhúng URL Path | `--token TOKEN` | Đọc từ config hoặc cờ CLI | Tham số token chèn vào đường dẫn resource URI (ví dụ `/api/v1/{token}/telemetry`). |
+| **LwM2M** | Registration Endpoint / PSK | `--server-uri URI`<br>`--endpoint-name NAME` | Đọc từ config hoặc cờ CLI | Điểm cuối đăng ký LwM2M Client Core. |
+| **DDS** | Không có xác thực ở tầng giao thức | (Không) | (Không) | Bảo mật tầng mạng Multicast SPDP/SEDP (hoặc DDS Security plugin chuyên biệt nếu có). |
+| **TCP / UDP**| Không có xác thực ở tầng giao thức | (Không) | (Không) | Socket thô truyền tải payload nhị phân hoặc chuỗi. |
+| **TFTP** | Không có xác thực ở tầng giao thức | (Không) | (Không) | Giao thức RFC 1350 không có khái niệm tài khoản đăng nhập. |
+| **LoRaWAN** | Không có xác thực ở tầng giao thức | (Không) | (Không) | Tầng Semtech UDP Packet Forwarder không xác thực; tính an toàn nằm trong payload LoRaWAN mã hóa (AppSKey, NwkSKey). |
+
+### 6.2. Thứ tự ưu tiên nạp thông tin xác thực
+
+Hệ thống áp dụng thứ tự ưu tiên giảm dần từ cao xuống thấp:
+1. **Tham số dòng lệnh CLI:** (`--header-key`, `--header-value`, `--username`, `--password`...).
+2. **Biến môi trường:** (`--header-value-env`, `--password-env`, `--username-env`...).
+3. **File cấu hình ghi đè cục bộ:** `config/config.local.yaml` (tệp này được đưa vào `.gitignore` để tránh commit nhầm credential).
+4. **File cấu hình gốc:** [config/config.yaml](config/config.yaml).
+
+*Lưu ý đối với HTTP:* Khi người vận hành cung cấp cặp header tùy biến (`--header-key` và `--header-value`), giá trị này sẽ thay thế hoàn toàn header mặc định cũ (`X-Authorization: Bearer ...`). Header cũ chỉ được sử dụng khi không có khai báo header mới nhằm duy trì tính tương thích ngược.
+
+Ví dụ định dạng HTTP Header:
+* Xác thực Bearer Token:
+  ```powershell
+  python sim/http_sim.py --header-key Authorization --header-value "Bearer my_secret_token_123"
+  ```
+* Xác thực API Key:
+  ```powershell
+  python sim/http_sim.py --header-key api_key --header-value "my_api_key_xyz"
+  ```
+
+### 6.3. Khuyến nghị lưu trữ thông tin xác thực an toàn
+
+Tuyệt đối không lưu trữ credential thật trong `config/config.yaml`. Thay vào đó, áp dụng một trong hai phương án an toàn sau:
+
+1. **Sử dụng tệp cấu hình cục bộ `config/config.local.yaml`:**
+   Tạo tệp `config/config.local.yaml` (đã có trong `.gitignore`) với nội dung ghi đè:
+   ```yaml
+   adapters:
+     http:
+       auth:
+         header_key: "Authorization"
+         header_value: "Bearer REAL_PLATFORM_TOKEN_123"
+     mqtt:
+       auth:
+         username: "device_auth_token"
+         password: ""
+   ```
+
+2. **Sử dụng biến môi trường hệ thống:**
+   Thiết lập biến môi trường trên Windows PowerShell:
+   ```powershell
+   $env:IOT_HTTP_TOKEN = "REAL_PLATFORM_TOKEN_123"
+   python sim/http_sim.py --header-key Authorization --header-value-env IOT_HTTP_TOKEN
+   ```
+
+---
+
+## 7. Bắt đầu nhanh
+
+Quy trình kiểm tra gồm 4 bước tiêu chuẩn:
 
 * **Bước 1: Xem trước các lệnh sẽ chạy (Dry-run):**
   ```powershell
   python run_sims.py --dry-run
   ```
-  Lệnh này in ra danh sách 12 dòng lệnh kèm tham số đầy đủ nhưng không gửi bất kỳ gói tin nào ra mạng.
+  Lệnh này in ra danh sách 13 dòng lệnh kèm tham số đầy đủ nhưng không gửi bất kỳ gói tin nào ra mạng.
 
-* **Bước 2: Chạy kiểm tra kết nối tới toàn bộ 12 mục tiêu:**
+* **Bước 2: Chạy kiểm tra kết nối tới toàn bộ 13 mục tiêu:**
   ```powershell
   python run_sims.py --mode connect
   ```
@@ -145,28 +255,30 @@ Sau khi hoàn tất cài đặt môi trường, quy trình kiểm tra nhanh gồ
   ```text
   | PROTO      | MODE     | RESULT          | EXIT   | TIME     | DETAIL
   |------------|----------|-----------------|--------|----------|----------------------------------------
-  | http       | connect  | OK              | 0      | 0.40s    | [stage:http_handshake] HTTP 200 OK ...
-  | mqtt       | connect  | REFUSED         | 2      | 2.34s    | [stage:tcp_connect] [WinError 10061]...
+  | http       | connect  | OK              | 0      | 0.30s    | [stage:http_handshake] HTTP 200 OK ...
+  | mqtt       | connect  | REFUSED         | 2      | 2.26s    | [stage:tcp_connect] [WinError 10061]...
   ...
-  Total: 12 | OK: 1 | REFUSED: 8 | TIMEOUT: 2 | AUTH_FAILED: 0 | PROTO_ERROR: 1
+  | ftp        | connect  | REFUSED         | 2      | 2.16s    | [stage:tcp_connect] [WinError 10061]...
+  |------------|----------|-----------------|--------|----------|----------------------------------------
+  Total: 13 | OK: 1 | REFUSED: 9 | TIMEOUT: 1 | AUTH_FAILED: 0 | PROTO_ERROR: 2
   ```
 
 * **Bước 4: Mở thư mục log kết quả:**
   Runner tự động tạo báo cáo chi tiết trong thư mục `logs/runs/<thời_điểm>/` gồm:
   - `results.json`: Dữ liệu JSON có cấu trúc đầy đủ.
   - `results.md`: Báo cáo định dạng Markdown scannable.
-  - `<proto>.txt`: Log thô đầu ra của từng simulator.
+  - `<proto>.txt`: Log thô đầu ra của từng simulator (đã che credential).
 
 ---
 
-## 7. Hướng dẫn sử dụng runner: `run_sims.py`
+## 8. Hướng dẫn sử dụng runner: `run_sims.py`
 
-### 7.1. Bảng tham số đầy đủ
+### 8.1. Bảng tham số đầy đủ
 
 | Tham số | Giá trị mặc định | Giải thích chi tiết |
 | :--- | :--- | :--- |
 | `--mode` | `connect` | Chế độ thực thi: `connect` (bắt tay), `send` (gửi mẫu), `listen` (nghe downlink), `both` (gửi và nghe). |
-| `--only` | Rỗng (chạy hết) | Danh sách giao thức cần chạy, ngăn cách bởi dấu phẩy (vd: `--only mqtt,http,tcp`). |
+| `--only` | Rỗng (chạy hết) | Danh sách giao thức cần chạy, ngăn cách bởi dấu phẩy (vd: `--only mqtt,http,tcp,ftp`). |
 | `--skip` | Rỗng | Danh sách giao thức cần bỏ qua, ngăn cách bởi dấu phẩy (vd: `--skip dds,lorawan`). |
 | `--host` | Đọc từ config (`127.0.0.1`) | Ghi đè địa chỉ IP của IoT Platform đích. |
 | `--timeout` | `5.0` (giây) | Thời gian chờ tối đa cho mỗi CLI. Trong chế độ `connect`, runner tự động nâng tối thiểu lên `3.0s` để an toàn với loopback Windows. |
@@ -176,30 +288,26 @@ Sau khi hoàn tất cài đặt môi trường, quy trình kiểm tra nhanh gồ
 | `--arg` | Không có | Bổ sung tham số thô cho từng CLI cụ thể (vd: `--arg 'mqtt="--port 1884"'`). |
 | `--dry-run` | `False` | Chỉ in lệnh thực thi dự kiến, không chạy tiến trình thật. |
 | `--show-payload` (hoặc `-v`) | `False` | In chi tiết cấu trúc bản tin và payload mẫu gửi đi của từng simulator ra console và ghi vào báo cáo kết quả (`results.json`, `results.md`). |
-| `--yes` | `False` | **Chốt an toàn:** Bắt buộc phải có khi chạy chế độ `--mode send` hoặc `--mode both`. |
-| `--allow-write` | `False` | **Chốt an toàn:** Bắt buộc phải có nếu chạy TFTP ở chế độ `send` hoặc `both` để cho phép ghi file lên server. |
+| `--yes` | `False` | **Chốt an toàn:** Bắt buộc phải có khi chạy chế độ `--mode send`, `--mode both`, hoặc khi chạy thử nghiệm tiêu cực `--auth-case wrong`. |
+| `--allow-write` | `False` | **Chốt an toàn:** Bắt buộc phải có nếu chạy TFTP hoặc FTP ở chế độ `send` hoặc `both` để cho phép ghi file lên server. |
+| `--auth-case` | `valid` | Thử nghiệm xác thực: `valid` (dùng credential hợp lệ) hoặc `wrong` (chủ động inject credential sai để thử nghiệm nhánh từ chối xác thực). |
 | `--out-dir` | `logs/runs/<thời_điểm>` | Ghi đè thư mục lưu trữ log và báo cáo kết quả. |
 
-### 7.2. Các ví dụ sử dụng thực tế
+### 8.2. Các ví dụ sử dụng thực tế
 
-* **Xem trước cấu trúc bản tin và payload của toàn bộ 12 mục tiêu (không chạy thật):**
+* **Xem trước cấu trúc bản tin và payload của toàn bộ 13 mục tiêu (không chạy thật):**
   ```powershell
   python run_sims.py --dry-run --show-payload
   ```
 
 * **Chạy kiểm tra và in chi tiết cấu trúc bản tin gửi đi ra màn hình:**
   ```powershell
-  python run_sims.py --mode connect --show-payload --only http,mqtt
+  python run_sims.py --mode connect --show-payload --only http,mqtt,ftp
   ```
 
-* **Chỉ kiểm tra kết nối MQTT và HTTP:**
+* **Chỉ kiểm tra kết nối MQTT, HTTP và FTP:**
   ```powershell
-  python run_sims.py --mode connect --only mqtt,http
-  ```
-
-* **Kiểm tra platform trên máy chủ khác trong mạng LAN:**
-  ```powershell
-  python run_sims.py --mode connect --host 192.168.1.100 --timeout 6.0
+  python run_sims.py --mode connect --only mqtt,http,ftp
   ```
 
 * **Gửi 5 bản tin telemetry mẫu qua MQTT (yêu cầu cờ `--yes`):**
@@ -207,37 +315,33 @@ Sau khi hoàn tất cài đặt môi trường, quy trình kiểm tra nhanh gồ
   python run_sims.py --mode send --only mqtt --count 5 --interval 2.0 --yes
   ```
 
-* **Lắng nghe downlink trong 10 giây qua TCP và UDP:**
+* **Thử nghiệm nhánh sai thông tin xác thực (Negative Auth Test, yêu cầu cờ `--yes`):**
   ```powershell
-  python run_sims.py --mode listen --only tcp,udp --duration 10.0
+  python run_sims.py --mode connect --only http,mqtt,ftp --auth-case wrong --yes
   ```
 
-* **Ghi đè cổng MQTT riêng biệt:**
-  ```powershell
-  python run_sims.py --mode connect --only mqtt --arg 'mqtt="--port 1884"'
-  ```
+### 8.3. Các chốt an toàn (Safety Barriers)
+1. **Chặn gửi dữ liệu ngoài ý muốn:** Khi chạy `--mode send` hoặc `--mode both`, runner dừng lại và thoát mã 10 nếu thiếu cờ `--yes`. Cơ chế này ngăn chặn việc vô tình gửi dữ liệu rác vào platform đang vận hành.
+2. **Cảnh báo khóa tài khoản khi thử xác thực sai:** Khi kích hoạt cờ `--auth-case wrong`, runner bắt buộc phải đi kèm cờ `--yes`. Nếu thiếu, runner dừng ngay lập tức nhằm bảo vệ tài khoản thật trên platform không bị kích hoạt cơ chế khóa tài khoản tự động (account lockout).
+3. **Bảo vệ ghi đè file với TFTP và FTP:** Giao thức TFTP và FTP thực hiện ghi file lên hệ thống lưu trữ. Nếu chạy `send` hoặc `both` mà thiếu cờ `--allow-write`, runner sẽ tự động bỏ qua (gán trạng thái `SKIPPED`) để ngăn chặn việc ghi đè dữ liệu trên server.
+4. **Kẹp timeout tối thiểu 3 giây:** Loopback trên Windows khi gặp cổng đóng cần khoảng 2 giây để hoàn thành chu trình thử nghiệm socket; nếu đặt timeout dưới 3s, kết quả sẽ bị nhầm lẫn thành `TIMEOUT` thay vì `REFUSED`.
 
-### 7.3. Các chốt an toàn (Safety Barriers)
-1. **Chặn gửi dữ liệu ngoài ý muốn:** Khi chạy `--mode send` hoặc `--mode both`, runner sẽ dừng lại và thoát mã 10 nếu thiếu cờ `--yes`. Cơ chế này ngăn chặn việc vô tình gửi dữ liệu rác vào platform đang vận hành.
-2. **Bảo vệ ghi đè TFTP:** Giao thức TFTP truyền file nhị phân. Nếu chạy send/both mà thiếu cờ `--allow-write`, runner sẽ tự động đánh dấu TFTP là `SKIPPED` để tránh ghi đè file trên máy chủ.
-3. **Kẹp timeout tối thiểu 3 giây:** Loopback trên Windows khi gặp cổng đóng cần khoảng 2 giây để hoàn thành chu trình thử nghiệm socket; nếu đặt timeout dưới 3s, kết quả sẽ bị nhầm lẫn thành `TIMEOUT` thay vì `REFUSED`.
-
-### 7.4. Mã thoát (Exit Code) của runner
+### 8.4. Mã thoát (Exit Code) của runner
 - `0`: Thực thi thành công toàn bộ các simulator theo kế hoạch (kể cả khi các simulator báo REFUSED/TIMEOUT).
 - `10`: Lỗi môi trường hoặc tham số không hợp lệ (ví dụ chạy ngoài môi trường Conda thiếu thư viện, thiếu cờ `--yes`, danh sách `--only` rỗng).
 - `11`: Cảnh báo rò rỉ tiến trình nền (phát hiện có tiến trình `java.exe` mồ côi chưa được giải phóng sau khi chạy xong).
 
 ---
 
-## 8. Hướng dẫn sử dụng từng CLI độc lập
+## 9. Hướng dẫn sử dụng từng CLI độc lập
 
-Mỗi simulator trong thư mục `sim/` có thể được gọi độc lập bằng dòng lệnh. Cả 11 CLI đều hỗ trợ 4 chế độ thông qua cờ `--mode`:
-- `connect`: Thử bắt tay/kết nối tối thiểu rồi thoát ngay lập tức (không gửi dữ liệu telemetry).
+Mỗi simulator trong thư mục `sim/` có thể được gọi độc lập bằng dòng lệnh. Cả 12 CLI đều hỗ trợ 4 chế độ thông qua cờ `--mode`:
+- `connect`: Bắt tay/kết nối tối thiểu rồi thoát ngay lập tức (không gửi dữ liệu telemetry).
 - `send`: Kết nối và gửi `--count` bản tin mẫu.
 - `listen`: Lắng nghe gói tin hoặc downlink từ platform trong `--duration` giây.
 - `both`: Kết hợp vừa gửi vừa lắng nghe.
 
-### Danh sách lệnh kiểm tra thực tế cho 11 giao thức:
+### Danh sách lệnh kiểm tra thực tế cho 13 giao thức:
 
 1. **HTTP ([sim/http_sim.py](sim/http_sim.py)):**
    ```powershell
@@ -267,7 +371,7 @@ Mỗi simulator trong thư mục `sim/` có thể được gọi độc lập b�
    ```powershell
    python sim/lwm2m_sim.py --mode connect --server-uri coap://127.0.0.1:5683 --timeout 5.0
    ```
-   > **CẢNH BÁO QUAN TRỌNG:** Khi chạy riêng lẻ `sim/lwm2m_sim.py`, nếu ngắt bằng `Ctrl+C`, tiến trình Java nền có thể không kịp đóng. Chạy lệnh `tasklist | findstr /i java` để kiểm tra. Nếu còn tồn tại PID java, thực thi dọn dẹp bằng script [scripts/teardown.ps1](scripts/teardown.ps1).
+   > **CẢNH BÁO QUAN TRỌNG:** Khi chạy riêng lẻ `sim/lwm2m_sim.py`, nếu ngắt bằng `Ctrl+C`, tiến trình Java nền có thể không kịp đóng. Chạy script [scripts/teardown.ps1](scripts/teardown.ps1) để kiểm tra và dọn dẹp sạch tiến trình mồ côi.
 8. **LoRaWAN ([sim/lorawan_sim.py](sim/lorawan_sim.py)):**
    ```powershell
    python sim/lorawan_sim.py --mode connect --host 127.0.0.1 --port 1700 --timeout 5.0
@@ -283,12 +387,16 @@ Mỗi simulator trong thư mục `sim/` có thể được gọi độc lập b�
     ```powershell
     python sim/tftp_sim.py --mode connect --host 127.0.0.1 --port 69 --timeout 5.0
     ```
+12. **FTP ([sim/ftp_sim.py](sim/ftp_sim.py)):**
+    ```powershell
+    python sim/ftp_sim.py --mode connect --host 127.0.0.1 --port 21 --timeout 5.0
+    ```
 
 ---
 
-## 9. Hướng dẫn đọc và giải thích kết quả
+## 10. Hướng dẫn đọc và giải thích kết quả
 
-### 9.1. Bảng trạng thái (Statuses)
+### 10.1. Bảng trạng thái (Statuses)
 
 | Trạng thái | Mã exit CLI | Ý nghĩa kỹ thuật | Nguyên nhân thường gặp | Việc cần xử lý |
 | :--- | :--- | :--- | :--- | :--- |
@@ -299,16 +407,16 @@ Mỗi simulator trong thư mục `sim/` có thể được gọi độc lập b�
 | **`PROTO_ERROR`**| `1` | Lỗi vi phạm giao thức (ví dụ HTTP 404/500, WebSocket không nhận header Upgrade 101). | Sai đường dẫn API endpoint, hoặc trỏ nhầm cổng dịch vụ khác. | Kiểm tra lại path API trong config; kiểm tra đụng độ cổng 8080. |
 | **`NO_RESULT_LINE`**| (Khác) | Tiến trình CLI bị crash hoặc không in dòng tổng kết chuẩn. | Lỗi cú pháp mã lệnh, thiếu module hoặc lỗi ngoại lệ hệ thống. | Đọc file log thô trong `logs/runs/<thời_điểm>/<proto>.txt`. |
 | **`RUNNER_TIMEOUT`**| `-1` | Tiến trình bị treo quá lâu và bị runner cưỡng chế ngắt (kill). | Simulator bị kẹt vòng lặp vô hạn hoặc socket chặn luồng. | Kiểm tra cấu hình timeout và thông số mạng. |
-| **`SKIPPED`** | (None) | Simulator được chủ động bỏ qua không thực thi. | Sử dụng cờ `--skip` hoặc TFTP thiếu cờ `--allow-write`. | Truyền thêm cờ nếu muốn thực thi simulator này. |
+| **`SKIPPED`** | (None) | Simulator được chủ động bỏ qua không thực thi. | Sử dụng cờ `--skip` hoặc TFTP/FTP thiếu cờ `--allow-write`. | Truyền thêm cờ nếu muốn thực thi simulator này. |
 
-### 9.2. Định dạng dòng kết quả chuẩn
+### 10.2. Định dạng dòng kết quả chuẩn
 Mỗi simulator khi kết thúc bắt buộc in ra một dòng duy nhất theo định dạng:
 ```text
 RESULT: <giao_thức> [mode=<CHẾ_ĐỘ> | <TRẠNG_THÁI>] detail=<chi_tiết_chẩn_đoán>
 ```
 *Ví dụ:* `RESULT: mqtt connect=REFUSED detail=[stage:tcp_connect] [WinError 10061] Connection refused`
 
-### 9.3. Các quy tắc quan trọng khi phân tích kết quả
+### 10.3. Các quy tắc quan trọng khi phân tích kết quả
 1. **TIMEOUT ở UDP và DDS mang nghĩa "chưa biết", không khẳng định là lỗi:** Giao thức UDP không hướng kết nối; khi server không chạy, nếu router/hệ điều hành không trả ICMP Port Unreachable thì socket chỉ có thể chờ đến khi hết hạn (timeout). Tương tự, DDS dùng Multicast discovery, không thấy participant nghĩa là chưa phát hiện đối tác.
 2. **OK ở TCP chỉ là bắt tay socket:** Trạng thái OK trên cổng TCP thô chỉ chứng minh việc thiết lập kết nối 3 bước (SYN -> SYN/ACK -> ACK) thành công, không khẳng định ứng dụng phía sau hiểu được cấu trúc bản tin.
 3. **LoRaWAN ACK không chứng minh tính hợp lệ của MIC hay payload:** Phản hồi `PUSH_ACK` từ Semtech Gateway protocol chỉ xác nhận Network Server đã nhận gói tin UDP từ Gateway forwarder; việc giải mã session key, kiểm tra MIC và bóc tách dữ liệu sensor diễn ra ở tầng ứng dụng sâu hơn.
@@ -317,25 +425,25 @@ RESULT: <giao_thức> [mode=<CHẾ_ĐỘ> | <TRẠNG_THÁI>] detail=<chi_tiết_
 
 ---
 
-## 10. Thử nghiệm LwM2M cục bộ (Tùy chọn)
+## 11. Thử nghiệm LwM2M cục bộ (Tùy chọn)
 
 Trường hợp chưa triển khai LwM2M Server trên platform, sử dụng demo server chính thức của Eclipse Leshan có sẵn trong thư mục `bin/` để kiểm chứng vòng đời LwM2M Client.
 
-### 10.1. Khởi chạy Leshan Server Demo
+### 11.1. Khởi chạy Leshan Server Demo
 Mở một cửa sổ terminal mới và thực thi:
 ```powershell
 java -jar bin/leshan-server-demo.jar --coap-port 5683 --web-port 8088
 ```
 *(Lưu ý: Bắt buộc truyền `--web-port 8088` để tránh đụng độ với cổng 8080 nếu đang có dịch vụ web khác chạy trên máy).*
 
-### 10.2. Chạy thử nghiệm LwM2M Simulator
+### 11.2. Chạy thử nghiệm LwM2M Simulator
 Trên cửa sổ terminal chính, thực hiện kết nối:
 ```powershell
 python sim/lwm2m_sim.py --mode connect --server-uri coap://127.0.0.1:5683 --timeout 5.0
 ```
 Kết quả mong đợi: `RESULT: lwm2m connect=OK detail=[stage:registration] Registered successfully with location: /rd/...`
 
-### 10.3. Dừng và dọn dẹp
+### 11.3. Dừng và dọn dẹp
 1. Nhấn `Ctrl + C` trên cửa sổ chạy server để tắt server.
 2. Kiểm tra sạch tiến trình nền bằng PowerShell:
    ```powershell
@@ -348,136 +456,28 @@ Kết quả mong đợi: `RESULT: lwm2m connect=OK detail=[stage:registration] R
 
 ---
 
-## 11. Hướng dẫn cấu hình kết nối tới IoT Platform bên ngoài
-
-Khi chuyển từ môi trường kiểm thử cục bộ (`127.0.0.1`) sang kết nối với một IoT Platform thực tế bên ngoài (on-premise server, máy ảo LAN hoặc cloud server), người vận hành điều chỉnh **file cấu hình trung tâm** [config/config.yaml](config/config.yaml) hoặc **ghi đè bằng tham số dòng lệnh CLI**.
-
-### 11.1. Các trường cần chỉnh sửa trong [config/config.yaml](config/config.yaml)
-
-Toàn bộ thông số kết nối của 11 giao thức nằm tập trung trong tệp [config/config.yaml](config/config.yaml). Mở tệp và cập nhật các khối sau:
-
-#### 1. Khối thông số chung (`global`)
-```yaml
-global:
-  target_host: "192.168.1.100"  # Đổi thành IP hoặc Domain của IoT Platform đích (thay cho 127.0.0.1)
-  timeout_sec: 5                # Thời gian chờ tối đa cho mỗi kết nối (giây)
-  device_id: "your_device_001"  # Mã định danh thiết bị đã đăng ký trên platform
-  telemetry_payload:            # Dữ liệu cảm biến cần gửi lên platform
-    temperature: 26.5
-    humidity: 65.0
-    status: "OK"
-```
-
-#### 2. Khối cấu hình từng giao thức (`adapters.<protocol>`)
-Tùy thuộc giao thức tiếp nhận dữ liệu của platform đích, điều chỉnh khối cấu hình tương ứng:
-
-* **HTTP (`adapters.http`):**
-  * `port`: Cổng dịch vụ HTTP của platform (mặc định 8080, hoặc 443 nếu dùng HTTPS).
-  * `auth_mode`: Chọn `"header"` (gửi token trong Header HTTP) hoặc `"url_token"` (gửi token nằm trên URL path).
-  * `access_token`: Token xác thực của thiết bị do platform cấp.
-  * `path` / `path_template`: Endpoint nhận telemetry (ví dụ `/api/v1/telemetry` hoặc `/api/v1/{token}/telemetry`).
-  * `headers`: Khai báo header xác thực nếu dùng `auth_mode: "header"` (ví dụ `X-Authorization: Bearer <token>` hoặc `Authorization`).
-
-* **MQTT (`adapters.mqtt`):**
-  * `port`: Cổng MQTT Broker (mặc định 1883, hoặc 8883 nếu bật TLS).
-  * `topic`: Topic tiếp nhận telemetry theo quy định của platform (ví dụ: `v1/devices/me/telemetry` hoặc `devices/{device_id}/telemetry`).
-  * `username` / `password`: Tài khoản kết nối MQTT (nhiều platform dùng `username` chính là Device Access Token và để trống password).
-  * `client_id`: ID của MQTT client (đổi sang chuỗi ngẫu nhiên nếu broker từ chối do trùng lặp).
-  * `qos`: Mức chất lượng dịch vụ (0, 1 hoặc 2).
-
-* **CoAP (`adapters.coap`):**
-  * `port`: Cổng CoAP Server (mặc định 5683, hoặc 5684 nếu DTLS).
-  * `path`: Đường dẫn resource nhận telemetry (ví dụ `api/v1/telemetry` hoặc `api/v1/{token}/telemetry`).
-  * `access_token`: Token xác thực thiết bị.
-
-* **AMQP (`adapters.amqp`):**
-  * `port`: Cổng AMQP Broker (mặc định 5672, hoặc 5671 nếu TLS).
-  * `username` / `password`: Tài khoản đăng nhập AMQP broker.
-  * `virtual_host`: Virtual host (mặc định `/`).
-  * `exchange` / `queue` / `routing_key`: Thông số định tuyến message trên RabbitMQ/ActiveMQ.
-
-* **WebSocket (`adapters.websocket`):**
-  * `port`: Cổng WebSocket service (mặc định 8080, hoặc 8443 / 443 nếu TLS).
-  * `path`: Đường dẫn URI WebSocket (ví dụ `/ws/telemetry` hoặc `/api/v1/ws`).
-  * `headers`: Headers xác thực kèm theo khi bắt tay WebSocket handshake.
-
-* **TCP / UDP thô (`adapters.tcp_udp`):**
-  * `port_tcp`: Cổng TCP socket lắng nghe (mặc định 9000).
-  * `port_udp`: Cổng UDP socket lắng nghe (mặc định 9001).
-
-* **LoRaWAN (`adapters.lorawan`):**
-  * `port`: Cổng Semtech Packet Forwarder UDP của Network Server (mặc định 1700).
-  * `dev_addr` / `gw_eui`: Địa chỉ thiết bị và mã EUI của Gateway.
-
-#### 3. Khối kết nối bảo mật (`tls`)
-Nếu platform yêu cầu mã hóa kết nối:
-```yaml
-tls:
-  enabled: true                 # Bật kiểm thử qua cổng bảo mật TLS/DTLS
-  ca_cert_path: "certs/ca.crt"  # Đường dẫn tới file root CA certificate (.crt/.pem)
-  client_cert_path: ""          # Đường dẫn client cert (nếu platform yêu cầu mTLS)
-  client_key_path: ""           # Đường dẫn client private key
-  insecure_skip_verify: true    # Đặt true để bỏ qua xác thực chứng chỉ nếu dùng cert tự ký
-```
-
----
-
-### 11.2. Cách thay thế: Ghi đè bằng cờ dòng lệnh CLI (Không cần sửa file)
-
-Để kiểm tra nhanh mà không cần sửa tệp `config.yaml`, có thể truyền trực tiếp tham số qua dòng lệnh:
-
-* **Ghi đè host cho toàn bộ suite với `run_sims.py`:**
-  ```powershell
-  # Kiểm tra kết nối tới server ngoài:
-  python run_sims.py --host 192.168.1.100 --mode connect
-
-  # Gửi dữ liệu qua MQTT và HTTP tới server ngoài kèm in cấu trúc bản tin:
-  python run_sims.py --host 192.168.1.100 --mode send --only mqtt,http --show-payload --yes
-  ```
-
-* **Ghi đè tài khoản và tham số khi chạy từng simulator độc lập:**
-  ```powershell
-  # MQTT: chỉ định host, port, username/token, password, topic
-  python sim/mqtt_sim.py --mode send --host iot.example.com --port 1883 -u MY_DEVICE_TOKEN -p "" --topic v1/devices/me/telemetry --count 3
-
-  # HTTP: chỉ định host, port, token và phương thức xác thực qua URL
-  python sim/http_sim.py --mode send --host iot.example.com --port 443 --tls --auth-mode url_token --token MY_DEVICE_TOKEN --count 1
-  ```
-
----
-
-### 11.3. Đối soát kết quả dữ liệu (Verification)
-
-Sau khi chạy ở chế độ `send` thành công (mã thoát 0):
-1. **Dữ liệu đối chiếu:** Khi kích hoạt cờ `--show-payload` (hoặc mở báo cáo `logs/runs/<thời_điểm>/results.json`), harness in ra chính xác:
-   - Thời điểm gửi (`timestamp` dạng epoch mili-giây).
-   - Nội dung bản tin JSON chi tiết (`device_id`, `temperature`, `humidity`, `seq`...).
-2. **Đối soát trên platform:** Mở cơ sở dữ liệu, màn hình telemetry hoặc API truy vấn dữ liệu của platform đích để so sánh các trường dữ liệu xem platform đã bóc tách và ghi nhận chính xác hay chưa.
-
----
-
 ## 12. Bảng xử lý sự cố thường gặp (Troubleshooting)
 
 | Triệu chứng | Nguyên nhân khả dĩ | Hướng dẫn xử lý |
 | :--- | :--- | :--- |
 | **HTTP báo `OK` nhưng mã 404, WebSocket báo `PROTO_ERROR`** | Cổng 8080 đang bị chiếm bởi dịch vụ web khác của máy (ví dụ web server nội bộ, Embedthis-http), không phải IoT Platform. | Chạy `netstat -ano \| findstr :8080` để tìm PID. Đổi cấu hình `adapters.http.port` và `adapters.websocket.port` trong [config/config.yaml](config/config.yaml) trỏ đúng cổng của platform. |
-| **Runner cảnh báo mã thoát 11 (rò rỉ Java)** | Simulator `lwm2m_sim.py` bị ngắt giữa chừng khiến tiến trình con `java.exe` không được giải phóng. | Chạy ngay script dọn dẹp [scripts/teardown.ps1](scripts/teardown.ps1) hoặc lệnh `taskkill /F /IM java.exe`. |
+| **Runner cảnh báo mã thoát 11 (rò rỉ Java)** | Simulator `lwm2m_sim.py` bị ngắt giữa chừng khiến tiến trình con `java.exe` không được giải phóng. | Chạy ngay script dọn dẹp [scripts/teardown.ps1](scripts/teardown.ps1) để chấm dứt các tiến trình con theo PID ghi nhận. |
 | **Đặt timeout 1s - 2s bị báo `TIMEOUT` dù cổng đóng** | Windows loopback socket khi kết nối tới cổng đóng mất ~2 giây để thử nghiệm ngăn xếp mạng trước khi trả lỗi Connection Refused. | Luôn duy trì timeout từ `3.0s` trở lên và sử dụng IP `127.0.0.1` thay vì `localhost`. |
 | **MQTT Broker ngắt kết nối im lặng (Connection closed)** | Trùng `client_id` với một client khác đang kết nối vào broker, hoặc username/password chưa được cấp quyền trong ACL. | Đổi `client_id` trong [config/config.yaml](config/config.yaml) thành chuỗi ngẫu nhiên (ví dụ `client_id: "test_client_999"`). |
 | **DDS báo `TIMEOUT` không thấy participant từ xa** | Mạng Multicast bị chặn bởi Firewall Windows, VPN đang bật, hoặc CycloneDDS tự chọn card mạng ảo (WSL/Hyper-V/VMware). | Tắt tạm thời VPN; mở inbound rule cho UDP; hoặc gán biến môi trường `CYCLONEDDS_URI` trỏ thẳng vào IP của card mạng vật lý đang kết nối platform. |
 | **CoAP DTLS không hoạt động trên Windows** | Thư viện `aiocoap` trên Windows thiếu backend OpenSSL DTLSSocket tương thích natively. | Chạy chế độ CoAP không mã hóa (cổng 5683) trên Windows; hoặc chuyển sang môi trường Linux nếu bắt buộc kiểm thử DTLS (coaps). |
 | **Chạy runner lập tức văng mã lỗi 10** | Đang chạy bằng Python base của hệ điều hành, thiếu các module bắt buộc (`pika`, `cyclonedds`, `yaml`). | Kích hoạt đúng môi trường Conda trước khi chạy: `conda activate iot-test`. |
-| **Xuất hiện "thiết bị ma" (phantom device) LwM2M** | Tiến trình Leshan client cũ bị sót và định kỳ tự động gửi bản tin update registration lên server. | Dọn dẹp triệt để tiến trình Java mồ côi bằng lệnh: `taskkill /F /IM java.exe`. |
+| **Xuất hiện "thiết bị ma" (phantom device) LwM2M** | Tiến trình Leshan client cũ bị sót và định kỳ tự động gửi bản tin update registration lên server. | Dọn dẹp triệt để tiến trình Java mồ côi bằng script [scripts/teardown.ps1](scripts/teardown.ps1). |
 
 ---
 
 ## 13. Cấu trúc thư mục dự án
 
-Toàn bộ 42 file trong repository được tổ chức tinh gọn và chuẩn hóa như sau:
+Toàn bộ 44 file trong repository được tổ chức tinh gọn và chuẩn hóa như sau:
 
 ```text
 iot-protocol-test-harness/
-|-- .gitignore                     # Bộ lọc chặn commit file log, bytecode pyc, file tạm
+|-- .gitignore                     # Bộ lọc chặn commit file log, bytecode pyc, config.local.yaml
 |-- Californium3.client.properties # Cấu hình CoAP/OSCORE của Eclipse Californium (Client)
 |-- Californium3.server.properties # Cấu hình CoAP/OSCORE của Eclipse Californium (Server)
 |-- README.md                      # Tài liệu hướng dẫn sử dụng và bàn giao hệ thống
@@ -486,7 +486,7 @@ iot-protocol-test-harness/
 |-- lorawan_udp_forwarder.py       # Bộ giả lập Semtech Packet Forwarder v2 thuần Python
 |-- requirements.lock.txt          # Danh sách thư viện Python với phiên bản cố định
 |-- requirements.txt               # Danh sách thư viện Python tối thiểu
-|-- run_sims.py                    # Script điều phối chạy gộp 11 CLI (12 mục tiêu)
+|-- run_sims.py                    # Script điều phối chạy gộp 12 CLI (13 mục tiêu)
 |-- sample.bin                     # File nhị phân mẫu phục vụ kiểm thử dữ liệu thô
 |-- setup_environment.ps1          # Script kiểm tra điều kiện tiên quyết môi trường (PowerShell)
 |-- setup_environment.sh           # Script kiểm tra điều kiện tiên quyết môi trường (Bash/Linux)
@@ -497,8 +497,22 @@ iot-protocol-test-harness/
 |   \-- leshan-server-demo.jar     # Server demo LwM2M chính thức của Eclipse Leshan (2.0.0-M17)
 |
 |-- config/
-|   |-- config.yaml                # Cấu hình kết nối trung tâm cho toàn bộ 11 giao thức
-|   \-- run_plan.yaml              # Kế hoạch gom nhóm cổng và thứ tự thực thi của runner
+|   |-- config.yaml                # Cấu hình kết nối trung tâm cho toàn bộ 13 giao thức
+|   |-- run_plan.yaml              # Kế hoạch gom nhóm cổng và thứ tự thực thi của runner
+|   \-- payloads/                  # Cấu hình payload động và danh sách device_ids cho 13 giao thức
+|       |-- amqp.json              # Payload cấu hình AMQP
+|       |-- coap.json              # Payload cấu hình CoAP
+|       |-- dds.json               # Payload cấu hình DDS
+|       |-- ftp.json               # Cấu hình truyền file FTP (device_ids)
+|       |-- http.json              # Payload cấu hình HTTP
+|       |-- lorawan.json           # Payload cấu hình LoRaWAN
+|       |-- lwm2m.json             # Payload cấu hình LwM2M
+|       |-- mqtt.json              # Payload cấu hình MQTT
+|       |-- tcp.json               # Payload cấu hình TCP thô
+|       |-- tftp.json              # Cấu hình truyền file TFTP (device_ids)
+|       |-- udp.json               # Payload cấu hình UDP thô
+|       |-- websocket.json         # Payload cấu hình WebSocket
+|       \-- xmpp.json              # Payload cấu hình XMPP
 |
 |-- logs/
 |   \-- .gitkeep                   # Giữ thư mục logs rỗng sạch sẽ trên Git
@@ -512,16 +526,17 @@ iot-protocol-test-harness/
 |   |-- __init__.py                # Package init của runner
 |   |-- execute.py                 # Quản lý thực thi tiến trình con và dọn dẹp Windows Job Object
 |   |-- parse.py                   # Phân tích cú pháp dòng RESULT và mã lỗi trả về
-|   |-- registry.py                # Danh bạ 12 mục tiêu và tự động phát hiện cờ dòng lệnh
+|   |-- redact.py                  # Module che giấu thông tin xác thực toàn diện (***)
+|   |-- registry.py                # Danh bạ 13 mục tiêu và tự động phát hiện cờ dòng lệnh
 |   \-- report.py                  # Xuất báo cáo bảng console, kết quả JSON và Markdown
 |
 |-- scripts/
-|   |-- check_ports.py             # Script kiểm tra khả năng kết nối tới các cổng đích
+|   |-- check_ports.py             # Script kiểm tra khả năng kết nối tới 12 cổng đích
 |   |-- teardown.ps1               # Script dọn dẹp tiến trình treo trên Windows (PowerShell)
 |   \-- teardown.sh                # Script dọn dẹp tiến trình treo trên Linux (Bash)
 |
 \-- sim/
-    |-- common.py                  # Module dùng chung chứa hằng số mã thoát và định dạng kết quả
+    |-- common.py                  # Module dùng chung chứa loader cấu hình, mã thoát và kết quả
     |-- http_sim.py                # Simulator giao thức HTTP (#1)
     |-- mqtt_sim.py                # Simulator giao thức MQTT (#2)
     |-- coap_sim.py                # Simulator giao thức CoAP (#3)
@@ -532,7 +547,8 @@ iot-protocol-test-harness/
     |-- lorawan_sim.py             # Simulator giao thức LoRaWAN (#8)
     |-- websocket_sim.py           # Simulator giao thức WebSocket (#9)
     |-- tcp_udp_sim.py             # Simulator giao thức TCP và UDP thô (#10)
-    \-- tftp_sim.py                # Simulator giao thức TFTP (#11)
+    |-- tftp_sim.py                # Simulator giao thức TFTP (#11)
+    \-- ftp_sim.py                 # Simulator giao thức FTP (#12)
 ```
 
 ---
@@ -540,9 +556,9 @@ iot-protocol-test-harness/
 ## 14. Các giới hạn đã biết
 
 1. **Mức độ kiểm chứng với Platform thực tế:**
-   - Bộ công cụ đã được kiểm chứng trên môi trường loopback cục bộ (`127.0.0.1`), qua các server demo độc lập và qua kết nối thực tế tới IoT Cloud Platform bằng MQTT và HTTP. Người dùng cần chủ động kiểm tra với các cổng hoặc adapter đặc thù khác của IoT Platform đích.
+   - Bộ công cụ đã được kiểm chứng trên môi trường loopback cục bộ (`127.0.0.1`) và qua các mock server độc lập. Các kịch bản phụ thuộc vào platform thực tế cần được kiểm chứng khi hệ thống IoT Platform mục tiêu được triển khai chính thức.
 2. **Hiện trạng hỗ trợ TLS / DTLS:**
-   - Mã nguồn các CLI đã có sẵn tham số và cờ `--tls`, `--insecure` cho các giao thức (HTTP, MQTT, CoAP, XMPP, AMQP, WebSocket).
+   - Mã nguồn các CLI đã có sẵn tham số và cờ `--tls`, `--insecure` cho các giao thức (HTTP, MQTT, CoAP, XMPP, AMQP, WebSocket, FTP).
    - Đã kiểm chứng thành công HTTPS cổng 443 và MQTT cổng 1883 tới cloud server ngoài. Các giao thức kiểm thử với chứng chỉ bảo mật riêng biệt (x509 CA cert, Client cert, PSK DTLS) cần được cấu hình bổ sung đường dẫn cert thật trong khối `tls` của [config/config.yaml](config/config.yaml).
 3. **Mức độ kiểm chứng chế độ `send` và `listen`:**
    - Các chế độ `send` và `listen` đã được kiểm chứng cú pháp, đóng gói bản tin và gửi nhận thành công, nhưng chưa thực hiện đo lường hiệu năng tải lớn (stress test) hay kiểm tra mất gói trên đường truyền mạng diện rộng.
@@ -555,8 +571,8 @@ iot-protocol-test-harness/
 
 1. **Thận trọng khi gửi dữ liệu thật:**
    Chế độ `--mode send` và `--mode both` sẽ trực tiếp đẩy dữ liệu telemetry vào broker hoặc server đích. Điều này có thể kích hoạt cảnh báo, ghi log hoặc làm sai lệch số liệu thống kê trên platform. Luôn luôn kiểm tra kỹ host đích và bắt buộc phải truyền cờ xác nhận `--yes`.
-2. **Cảnh báo ghi đè file với TFTP:**
-   Simulator [sim/tftp_sim.py](sim/tftp_sim.py) ở chế độ send sẽ đẩy file lên thư mục lưu trữ của TFTP server. Bắt buộc phải có cờ `--allow-write` và đảm bảo tên file tải lên không ghi đè vào các file cấu hình quan trọng của hệ thống.
+2. **Cảnh báo ghi đè file với TFTP và FTP:**
+   Simulator [sim/tftp_sim.py](sim/tftp_sim.py) và [sim/ftp_sim.py](sim/ftp_sim.py) ở chế độ send sẽ đẩy file lên thư mục lưu trữ của server. Bắt buộc phải có cờ `--allow-write` và đảm bảo tên file tải lên không ghi đè vào các file cấu hình quan trọng của hệ thống.
 3. **Mật khẩu và Token mẫu:**
    Mọi token (`test_token_http`, `test_token_coap`), mật khẩu (`secret`, `guest`) trong [config/config.yaml](config/config.yaml) đều là giá trị ví dụ (mock). Trước khi kết nối vào platform thực tế, người vận hành bắt buộc phải thay thế bằng thông tin tài khoản và access token do platform cấp phát.
 4. **Quy trình vận hành chuẩn khuyến nghị:**

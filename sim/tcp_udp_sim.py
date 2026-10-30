@@ -32,8 +32,9 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result, classify_socket_error
-, setup_simulator_logger)
+    format_result, classify_socket_error, setup_simulator_logger,
+    load_payload_config, generate_payload, run_devices_parallel
+)
 
 try:
     import yaml
@@ -65,6 +66,127 @@ def get_default_config():
 def setup_logger(args=None):
     return setup_simulator_logger("tcp_udp", args=args)
 
+
+def do_send_parallel_tcp(args, logger):
+    payload_cfg = load_payload_config("tcp", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or [args.device_id]
+        attributes = payload_cfg.get("attributes", [])
+        default_count = payload_cfg.get("count", 1)
+        default_interval = payload_cfg.get("interval", 1.0)
+    else:
+        device_ids = [args.device_id]
+        attributes = None
+        default_count = 1
+        default_interval = 1.0
+
+    count = args.count if args.count is not None else default_count
+    interval = args.interval if args.interval is not None else default_interval
+
+    logger.info(f"[*] [TCP SEND] Target: {args.host}:{args.port} | Devices: {len(device_ids)} | Count: {count} | Interval: {interval}s")
+
+    def send_tcp_device(dev_id: str, dev_logger) -> str:
+        s = socket.socket(socket.AF_INET6 if ":" in args.host else socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(args.timeout)
+        try:
+            s.connect((args.host, args.port))
+            for seq in range(1, count + 1):
+                if attributes:
+                    telemetry = generate_payload(attributes, device_id=dev_id, seq=seq)
+                else:
+                    telemetry = {
+                        "device_id": dev_id,
+                        "proto": "TCP",
+                        "seq": seq,
+                        "temperature": round(25.0 + seq * 0.1, 2),
+                        "timestamp": int(time.time() * 1000)
+                    }
+                data_bytes = (json.dumps(telemetry) + "\n").encode('utf-8')
+                s.sendall(data_bytes)
+                dev_logger.info(f"[{datetime.now().isoformat()}] ---> [DEVICE {dev_id}] TCP SEND: {data_bytes.decode('utf-8').strip()}")
+                s.settimeout(1.0)
+                try:
+                    resp = s.recv(1024)
+                    if resp:
+                        dev_logger.info(f"[{datetime.now().isoformat()}] <--- [DEVICE {dev_id}] TCP Response: {resp.decode('utf-8', errors='replace').strip()}")
+                except socket.timeout:
+                    pass
+                if seq < count:
+                    time.sleep(interval)
+            return STATUS_OK, f"sent {count} msgs"
+        finally:
+            s.close()
+
+    return run_devices_parallel(
+        "tcp",
+        "send",
+        device_ids,
+        send_tcp_device,
+        timeout_per_device=args.timeout * count + 5.0,
+        args=args,
+        logger=logger,
+    )
+
+
+def do_send_parallel_udp(args, logger):
+    payload_cfg = load_payload_config("udp", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or [args.device_id]
+        attributes = payload_cfg.get("attributes", [])
+        default_count = payload_cfg.get("count", 1)
+        default_interval = payload_cfg.get("interval", 1.0)
+    else:
+        device_ids = [args.device_id]
+        attributes = None
+        default_count = 1
+        default_interval = 1.0
+
+    count = args.count if args.count is not None else default_count
+    interval = args.interval if args.interval is not None else default_interval
+
+    logger.info(f"[*] [UDP SEND] Target: {args.host}:{args.port} | Devices: {len(device_ids)} | Count: {count} | Interval: {interval}s")
+
+    def send_udp_device(dev_id: str, dev_logger) -> str:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(args.timeout)
+        try:
+            for seq in range(1, count + 1):
+                if attributes:
+                    telemetry = generate_payload(attributes, device_id=dev_id, seq=seq)
+                else:
+                    telemetry = {
+                        "device_id": dev_id,
+                        "proto": "UDP",
+                        "seq": seq,
+                        "temperature": round(26.0 + seq * 0.2, 2),
+                        "timestamp": int(time.time() * 1000)
+                    }
+                data_bytes = json.dumps(telemetry).encode('utf-8')
+                s.sendto(data_bytes, (args.host, args.port))
+                dev_logger.info(f"[{datetime.now().isoformat()}] ---> [DEVICE {dev_id}] UDP SEND: {data_bytes.decode('utf-8')}")
+                s.settimeout(1.0)
+                try:
+                    resp, addr = s.recvfrom(2048)
+                    dev_logger.info(f"[{datetime.now().isoformat()}] <--- [DEVICE {dev_id}] UDP Response from {addr}: {resp.decode('utf-8', errors='replace')}")
+                except socket.timeout:
+                    pass
+                if seq < count:
+                    time.sleep(interval)
+            return STATUS_OK, f"sent {count} msgs"
+        finally:
+            s.close()
+
+    return run_devices_parallel(
+        "udp",
+        "send",
+        device_ids,
+        send_udp_device,
+        timeout_per_device=args.timeout * count + 5.0,
+        args=args,
+        logger=logger,
+    )
+
+
 def run_tcp(args, logger):
     logger.info(f"[*] Starting TCP Simulator in '{args.mode}' mode to {args.host}:{args.port}...")
     t0 = time.perf_counter()
@@ -95,6 +217,10 @@ def run_tcp(args, logger):
         return format_result("tcp_udp", "connect", STATUS_OK,
                              f"TCP connection established to {args.host}:{args.port} (TCP handshake level only)",
                              stage="tcp_connect")
+
+    if args.mode == "send":
+        s.close()
+        return do_send_parallel_tcp(args, logger)
 
     send_count = 0
     recv_count = 0
@@ -224,6 +350,10 @@ def run_udp(args, logger):
             logger.error(f"[!] UDP connect error: {e}")
             return format_result("tcp_udp", "connect", STATUS_PROTO_ERROR, f"UDP error: {e}", stage="udp_probe", elapsed=elapsed)
 
+    if args.mode == "send":
+        s.close()
+        return do_send_parallel_udp(args, logger)
+
     send_count = 0
     recv_count = 0
 
@@ -303,7 +433,7 @@ def main():
     cfg = get_default_config()
     parser = argparse.ArgumentParser(
         description="Raw TCP & UDP IoT Protocol Simulator CLI",
-        epilog="Chế độ 'connect': TCP bắt tay connect; UDP gửi datagram và chờ phản hồi. CẢNH BÁO WINDOWS: trên Windows loopback, cổng đóng có thể mất ~2s mới báo refused (WinError 10061); khuyến nghị dùng --timeout >= 3.0 cho connect."
+        epilog="Chế độ 'connect': TCP bắt tay connect; UDP gửi datagram và chờ phản hồi. CẢNH BÁO WINDOWS: trên Windows loopback, cổng đóng có thể mất ~2s mới báo refused (WinError 10061); khuyến nghị dùng --timeout >= 3.0 cho connect.\nLưu ý: TCP/UDP thô không có xác thực ở tầng giao thức."
     )
     parser.add_argument("--transport", choices=["tcp", "udp"], default="tcp", help="Transport protocol: 'tcp' or 'udp' (default: tcp)")
     parser.add_argument("--mode", choices=["connect", "send", "listen", "both"], default="connect",
@@ -315,8 +445,8 @@ def main():
     parser.add_argument("--device-id", default="sim_raw_001", help="Device ID")
     parser.add_argument("--tls", action="store_true", help="Request TLS (Not supported for raw socket)")
     parser.add_argument("--insecure", action="store_true", help="Unused for raw socket")
-    parser.add_argument("--count", type=int, default=1, help="Message count to send (default: 1)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Interval between sends in seconds (default: 1.0)")
+    parser.add_argument("--count", type=int, default=None, help="Message count to send (default: from payload config or 1)")
+    parser.add_argument("--interval", type=float, default=None, help="Interval between sends in seconds (default: from payload config or 1.0)")
     parser.add_argument("--duration", type=float, default=5.0, help="Listen duration in seconds (default: 5.0)")
     parser.add_argument("--timeout", type=float, default=3.0, help="Socket timeout in seconds (default: 3.0)")
 

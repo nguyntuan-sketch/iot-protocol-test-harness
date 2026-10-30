@@ -3,8 +3,8 @@
 IoT Protocol Simulators Aggregate Runner
 File: run_sims.py
 
-Orchestrates sequential execution of all 11 IoT Protocol Simulators in sim/
-(12 protocol targets including TCP and UDP separately).
+Orchestrates sequential execution of all 12 IoT Protocol Simulators in sim/
+(13 protocol targets including TCP and UDP separately).
 """
 
 import argparse
@@ -23,6 +23,7 @@ if sys.platform == "win32":
 # Step 1: Strict Environment Check
 from runner.execute import check_environment, get_java_pids, execute_cli
 check_environment()
+from sim.common import load_merged_config
 
 import yaml
 from runner.registry import (
@@ -44,20 +45,13 @@ from runner.report import (
 
 
 def load_config(config_path: str = "config/config.yaml") -> dict:
-    """Loads central configuration safely."""
-    if not os.path.exists(config_path):
-        return {}
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        print(f"[CẢNH BÁO] Không thể đọc cấu hình từ {config_path}: {e}", file=sys.stderr)
-        return {}
+    """Loads central configuration safely with local overrides."""
+    return load_merged_config()
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="IoT Protocol Simulators Runner — Chạy gộp 11 CLI trong sim/",
+        description="IoT Protocol Simulators Runner — Chạy gộp 12 CLI trong sim/",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ví dụ sử dụng:
@@ -137,7 +131,13 @@ Ví dụ sử dụng:
     parser.add_argument(
         "--allow-write",
         action="store_true",
-        help="Cho phép TFTP ghi file lên server (bắt buộc khi chạy tftp ở chế độ send/both)",
+        help="Cho phép TFTP/FTP ghi file lên server (bắt buộc khi chạy tftp/ftp ở chế độ send/both)",
+    )
+    parser.add_argument(
+        "--auth-case",
+        choices=["valid", "wrong"],
+        default="valid",
+        help="Kiểm thử xác thực: 'valid' (mặc định) hoặc 'wrong' (dùng credential sai để thử nhánh từ chối)",
     )
     parser.add_argument(
         "--out-dir",
@@ -188,7 +188,7 @@ def main():
     http_port = adapters_cfg.get("http", {}).get("port", 8080)
     ws_port = adapters_cfg.get("websocket", {}).get("port", 8080)
     if http_port == 8080 or ws_port == 8080:
-        print("[LƯU Ý] Cổng 8080 (HTTP/WebSocket) thường bị dịch vụ khác chiếm. Hãy xác nhận đúng platform của bạn bằng: netstat -ano | findstr :8080. Kết quả tại cổng này có thể không phải của IoT Platform.", file=sys.stderr)
+        print("[LƯU Ý] Cổng 8080 (HTTP/WebSocket) thường bị dịch vụ khác chiếm. Cần xác nhận đúng platform mục tiêu bằng: netstat -ano | findstr :8080. Kết quả tại cổng này có thể không phải của IoT Platform.", file=sys.stderr)
 
     # Connect mode timeout clamping
     if not args.custom_script and args.mode == "connect" and args.timeout < 3.0:
@@ -198,10 +198,20 @@ def main():
     # Safety Barrier: send / both requires --yes
     if args.mode in ("send", "both") and not args.yes:
         print("================================================================================", file=sys.stderr)
-        print(f"[CHẶN AN TOÀN] Bạn đang yêu cầu chạy ở chế độ '--mode {args.mode}'.", file=sys.stderr)
+        print(f"[CHẶN AN TOÀN] Hệ thống nhận yêu cầu chạy ở chế độ '--mode {args.mode}'.", file=sys.stderr)
         print("Chế độ này sẽ gửi dữ liệu telemetry mẫu vào mạng hoặc platform đích.", file=sys.stderr)
-        print("Để tiếp tục, bạn bắt buộc phải truyền cờ '--yes' để xác nhận thực thi:", file=sys.stderr)
+        print("Để tiếp tục, bắt buộc phải truyền cờ '--yes' để xác nhận thực thi:", file=sys.stderr)
         cmd_args = " ".join(sys.argv[1:]) if sys.argv[1:] else f"--mode {args.mode}"
+        print(f"  python run_sims.py {cmd_args} --yes", file=sys.stderr)
+        print("================================================================================", file=sys.stderr)
+        sys.exit(10)
+
+    if args.auth_case == "wrong" and not args.yes:
+        print("================================================================================", file=sys.stderr)
+        print("[CHẶN AN TOÀN] Hệ thống nhận yêu cầu chạy với '--auth-case wrong'.", file=sys.stderr)
+        print("Thử nghiệm thông tin xác thực sai có thể kích hoạt cơ chế khóa tài khoản (lockout) trên platform đích.", file=sys.stderr)
+        print("Để tiếp tục, bắt buộc phải truyền cờ '--yes' để xác nhận thực thi:", file=sys.stderr)
+        cmd_args = " ".join(sys.argv[1:]) if sys.argv[1:] else "--auth-case wrong"
         print(f"  python run_sims.py {cmd_args} --yes", file=sys.stderr)
         print("================================================================================", file=sys.stderr)
         sys.exit(10)
@@ -248,8 +258,8 @@ def main():
         print("\n=== [DRY-RUN] DANH SÁCH LỆNH CHẠY CỦA CÁC SIMULATOR ===")
         print(f"Chế độ: {args.mode} | Host: {target_host} | Timeout: {args.timeout}s\n")
         for entry in registry:
-            # Check TFTP safety in dry-run
-            if entry.name == "tftp" and args.mode in ("send", "both") and not args.allow_write:
+            # Check TFTP / FTP safety in dry-run
+            if entry.name in ("tftp", "ftp") and args.mode in ("send", "both") and not args.allow_write:
                 print(f"[DRY-RUN] {entry.name:<10} (nhóm: {entry.group:<8}): SKIPPED (needs --allow-write)")
                 continue
 
@@ -259,7 +269,7 @@ def main():
             cmd_display = redactor.redact_text(' '.join(cmd))
             print(f"[DRY-RUN] {entry.name:<10} (nhóm: {entry.group:<8}): {cmd_display}{notes_str}")
             if args.show_payload:
-                print_payload_info(entry.name, config, target_host, args.mode, redactor=redactor)
+                print_payload_info(entry.name, config, target_host, args.mode, redactor=redactor, custom_args_map=custom_args_map)
         print("\n" + MANDATORY_NOTICE + "\n")
         sys.exit(0)
 
@@ -277,17 +287,17 @@ def main():
     print(f"[*] Thư mục lưu kết quả: {run_dir}\n")
 
     for entry in registry:
-        # Check TFTP safety
-        if entry.name == "tftp" and args.mode in ("send", "both") and not args.allow_write:
-            print(f">>> Bỏ qua tftp: Thiếu cờ --allow-write ở chế độ {args.mode}.")
+        # Check TFTP / FTP safety
+        if entry.name in ("tftp", "ftp") and args.mode in ("send", "both") and not args.allow_write:
+            print(f">>> Bỏ qua {entry.name}: Thiếu cờ --allow-write ở chế độ {args.mode}.")
             results.append(
                 ParsedResult(
-                    proto="tftp",
+                    proto=entry.name,
                     mode=args.mode,
                     status="SKIPPED",
                     exit_code=-1,
                     elapsed=0.0,
-                    detail="SKIPPED: Cần cờ --allow-write để thực hiện TFTP WRQ",
+                    detail=f"SKIPPED: Cần cờ --allow-write để thực hiện {entry.name.upper()} ghi dữ liệu",
                     notes=["SKIPPED (needs --allow-write)"],
                     raw_cmd="(skipped)",
                     log_file="",
@@ -310,7 +320,7 @@ def main():
         cmd_display = redactor.redact_text(' '.join(cmd))
         print(f"[{entry.name.upper()}] Đang chạy: {cmd_display}")
         if args.show_payload:
-            print_payload_info(entry.name, config, target_host, args.mode, redactor=redactor)
+            print_payload_info(entry.name, config, target_host, args.mode, redactor=redactor, custom_args_map=custom_args_map)
         exec_res = execute_cli(
             cmd=cmd,
             timeout=args.timeout,
@@ -319,6 +329,18 @@ def main():
             out_file=log_file,
             redactor=redactor,
         )
+
+        # Secondary redaction guarantee for logs/<proto>.log
+        cli_log_path = os.path.join("logs", f"{entry.name}.log")
+        if os.path.isfile(cli_log_path):
+            try:
+                with open(cli_log_path, "r", encoding="utf-8", errors="replace") as clf:
+                    clog = clf.read()
+                clog_red = redactor.redact_text(clog)
+                with open(cli_log_path, "w", encoding="utf-8") as clf:
+                    clf.write(clog_red)
+            except Exception:
+                pass
 
         parsed = parse_cli_output(
             proto_name=entry.name,

@@ -1,0 +1,14 @@
+{
+  "interval": 2,
+  "count": 5,
+  "device_ids": [
+    "lora_dev_01",
+    "lora_dev_02"
+  ],
+  "attributes": [
+    { "fieldName": "temperature", "type": "double", "value": null, "min": -10.0, "max": 50.0 },
+    { "fieldName": "battery_mv", "type": "int", "value": null, "min": 3000, "max": 4200 },
+    { "fieldName": "rssi", "type": "int", "value": null, "min": -110, "max": -50 }
+  ]
+}
+

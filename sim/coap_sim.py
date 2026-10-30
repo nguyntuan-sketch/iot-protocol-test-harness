@@ -32,8 +32,10 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result, classify_socket_error, setup_simulator_logger
+    format_result, classify_socket_error, setup_simulator_logger,
+    load_merged_config, load_payload_config, generate_payload, run_devices_parallel
 )
+from typing import Tuple, List, Optional, Dict
 
 try:
     import yaml
@@ -50,34 +52,23 @@ except ImportError:
 
 
 def get_default_config():
-    cfg_path = os.path.join(base_dir, "config", "config.yaml")
+    raw = load_merged_config(base_dir)
+    target = raw.get("global", {})
+    cp = raw.get("adapters", {}).get("coap", {})
+    tls = raw.get("tls", {})
+    ports = tls.get("ports", {})
+
     cfg = {
-        "host": "127.0.0.1",
-        "port": 5683,
-        "port_tls": 5684,
-        "path": "api/v1/telemetry",
-        "access_token": "test_token_coap",
-        "message_type": "CON",
-        "downlink_path": "api/v1/device/downlink",
-        "tls_enabled": False
+        "host": target.get("target_host", "127.0.0.1"),
+        "port": cp.get("port", 5683),
+        "port_tls": ports.get("coap_dtls", 5684),
+        "path": cp.get("path", "api/v1/telemetry"),
+        "access_token": cp.get("access_token", "test_token_coap"),
+        "message_type": cp.get("message_type", "CON"),
+        "downlink_path": cp.get("downlink_path", "api/v1/device/downlink"),
+        "device_id": target.get("device_id", "sim_device_001"),
+        "tls_enabled": tls.get("enabled", False)
     }
-    if yaml and os.path.isfile(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                raw = yaml.safe_load(f)
-                target = raw.get("target", {})
-                cp = raw.get("adapters", {}).get("coap", {})
-                tls = raw.get("tls", {})
-                cfg["host"] = target.get("host", cfg["host"])
-                cfg["port"] = cp.get("port", cfg["port"])
-                cfg["path"] = cp.get("path", cfg["path"])
-                cfg["access_token"] = cp.get("access_token", cfg["access_token"])
-                cfg["message_type"] = cp.get("message_type", cfg["message_type"])
-                cfg["tls_enabled"] = tls.get("enabled", cfg["tls_enabled"])
-                ports = tls.get("ports", {})
-                cfg["port_tls"] = ports.get("coap_dtls", cfg["port_tls"])
-        except Exception as e:
-            sys.stderr.write(f"[WARN] Failed to read config.yaml: {e}\n")
     return cfg
 
 
@@ -142,72 +133,100 @@ async def do_connect(args, cfg, logger):
         return format_result("coap", "connect", status, detail, stage="handshake")
 
 
-async def do_send(args, cfg, logger):
+def do_send_parallel(args, cfg, logger):
     scheme = "coaps" if args.tls else "coap"
     uri = f"{scheme}://{args.host}:{args.port}/{args.path.lstrip('/')}"
     if args.token:
         sep = "&" if "?" in uri else "?"
         uri += f"{sep}token={args.token}"
 
-    logger.info(f"[*] [CoAP SEND] Target: {uri} | Count: {args.count} | Interval: {args.interval}s")
-    try:
-        protocol = await Context.create_client_context()
-    except Exception as ce:
-        logger.error(f"[!] Cannot create aiocoap context: {ce}")
-        return format_result("coap", "send", STATUS_PROTO_ERROR, f"Context error: {ce}", stage="init")
+    payload_cfg = load_payload_config("coap", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or [args.device_id]
+        attributes = payload_cfg.get("attributes", [])
+        default_count = payload_cfg.get("count", 1)
+        default_interval = payload_cfg.get("interval", 1.0)
+    else:
+        device_ids = [args.device_id]
+        attributes = None
+        default_count = 1
+        default_interval = 1.0
 
-    success_count = 0
-    last_resp = None
+    count = args.count if args.count is not None else default_count
+    interval = args.interval if args.interval is not None else default_interval
 
-    for i in range(1, args.count + 1):
-        telemetry = {
-            "device_id": args.device_id,
-            "seq": i,
-            "temperature": round(23.4 + i * 0.4, 2),
-            "humidity": round(65.0 - i * 0.3, 2),
-            "timestamp": int(time.time() * 1000)
-        }
-        payload_bytes = json.dumps(telemetry).encode("utf-8")
-        request = Message(code=Code.POST, payload=payload_bytes, uri=uri)
+    logger.info(f"[*] [CoAP SEND] Target: {uri} | Devices: {len(device_ids)} | Count: {count} | Interval: {interval}s")
 
-        logger.info(f"[{datetime.now().isoformat()}] ---> CoAP POST {uri} (CON) | Payload: {telemetry}")
+    def _coap_worker(dev_id: str, dev_logger: logging.Logger) -> Tuple[str, str]:
+        sub_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(sub_loop)
+
+        async def _async_run():
+            try:
+                protocol = await Context.create_client_context()
+            except Exception as ce:
+                dev_logger.error(f"[!] Cannot create aiocoap context: {ce}")
+                return STATUS_PROTO_ERROR, f"Context error: {ce}"
+
+            success_count = 0
+            last_resp = None
+            try:
+                for i in range(1, count + 1):
+                    if attributes is not None:
+                        telemetry = generate_payload(attributes, device_id=dev_id, seq=i, logger=dev_logger)
+                    else:
+                        telemetry = {
+                            "device_id": dev_id,
+                            "seq": i,
+                            "temperature": round(23.4 + i * 0.4, 2),
+                            "humidity": round(65.0 - i * 0.3, 2),
+                            "timestamp": int(time.time() * 1000)
+                        }
+                    payload_bytes = json.dumps(telemetry).encode("utf-8")
+                    request = Message(code=Code.POST, payload=payload_bytes, uri=uri)
+                    dev_logger.info(f"[{datetime.now().isoformat()}] ---> CoAP POST {uri} (CON) | Payload: {telemetry}")
+
+                    resp = await asyncio.wait_for(protocol.request(request).response, timeout=args.timeout)
+                    raw_payload = resp.payload.decode("utf-8", errors="replace")
+                    last_resp = str(resp.code)
+                    dev_logger.info(f"[{datetime.now().isoformat()}] <--- Raw CoAP Response Code: {resp.code} (MID: {resp.mid})")
+                    dev_logger.info(f"     Raw CoAP Payload: {raw_payload or '(empty)'}")
+                    if resp.code.is_successful():
+                        success_count += 1
+                    elif resp.code in (Code.UNAUTHORIZED, Code.FORBIDDEN):
+                        return STATUS_AUTH_FAILED, f"AUTH_FAILED (CoAP {resp.code})"
+
+                    if i < count:
+                        await asyncio.sleep(interval)
+            except asyncio.TimeoutError:
+                dev_logger.error(f"[!] CoAP Request Timeout after {args.timeout}s")
+                return STATUS_TIMEOUT, f"TIMEOUT after {args.timeout}s"
+            except coap_error.NoRequestInterface as nri:
+                dev_logger.error(f"[!] CoAP DTLS transport unavailable: {nri}")
+                return STATUS_PROTO_ERROR, f"PROTO_ERROR (DTLS backend: {nri})"
+            except Exception as e:
+                err_msg = str(e)
+                dev_logger.error(f"[!] CoAP request error: {err_msg}")
+                st, det = classify_coap_network_error(err_msg)
+                return st, det
+            finally:
+                try:
+                    await protocol.shutdown()
+                except Exception:
+                    pass
+
+            if success_count > 0:
+                return STATUS_OK, f"OK x{success_count}"
+            else:
+                return STATUS_PROTO_ERROR, f"CoAP {last_resp or 'No success responses'}"
 
         try:
-            resp = await asyncio.wait_for(protocol.request(request).response, timeout=args.timeout)
-            raw_payload = resp.payload.decode("utf-8", errors="replace")
-            last_resp = str(resp.code)
-            logger.info(f"[{datetime.now().isoformat()}] <--- Raw CoAP Response Code: {resp.code} (MID: {resp.mid})")
-            logger.info(f"     Raw CoAP Payload: {raw_payload or '(empty)'}")
-            if resp.code.is_successful():
-                success_count += 1
-            elif resp.code in (Code.UNAUTHORIZED, Code.FORBIDDEN):
-                await protocol.shutdown()
-                return format_result("coap", "send", STATUS_AUTH_FAILED, f"CoAP {resp.code}", stage="auth")
-        except asyncio.TimeoutError:
-            logger.error(f"[!] CoAP Request Timeout after {args.timeout}s")
-            await protocol.shutdown()
-            return format_result("coap", "send", STATUS_TIMEOUT, f"Timeout after {args.timeout}s", stage="request")
-        except coap_error.NoRequestInterface as nri:
-            logger.error(f"[!] CoAP DTLS transport unavailable: {nri}")
-            await protocol.shutdown()
-            return format_result("coap", "send", STATUS_PROTO_ERROR,
-                                 f"DTLS backend not installed for aiocoap on Windows ({nri})", stage="dtls_init")
-        except Exception as e:
-            await protocol.shutdown()
-            err_msg = str(e)
-            logger.error(f"[!] CoAP request error: {err_msg}")
-            status, detail = classify_coap_network_error(err_msg)
-            return format_result("coap", "send", status, detail, stage="request")
+            return sub_loop.run_until_complete(_async_run())
+        finally:
+            sub_loop.close()
 
-        if i < args.count:
-            await asyncio.sleep(args.interval)
-
-    await protocol.shutdown()
-    logger.info(f"[*] CoAP send completed: {success_count}/{args.count} successful.")
-    if success_count > 0:
-        return format_result("coap", "send", STATUS_OK, f"CoAP {last_resp}", stage="channel")
-    else:
-        return format_result("coap", "send", STATUS_PROTO_ERROR, f"CoAP {last_resp or 'No success responses'}", stage="channel")
+    max_dev_timeout = (args.timeout * (count or 5) + (interval * (count or 5)) + 5.0)
+    return run_devices_parallel("coap", args.mode, device_ids, _coap_worker, timeout_per_device=max_dev_timeout, args=args, logger=logger)
 
 
 async def do_listen(args, cfg, logger):
@@ -271,9 +290,9 @@ def main():
     parser.add_argument("--token", default=cfg["access_token"], help="Device access token")
     parser.add_argument("--tls", action="store_true", default=cfg.get("tls_enabled", False), help="Enable DTLS (coaps://)")
     parser.add_argument("--insecure", action="store_true", default=False, help="Skip certificate verification if DTLS is used")
-    parser.add_argument("--device-id", default="sim_coap_001", help="Simulator device ID")
-    parser.add_argument("--count", type=int, default=1, help="Telemetry count to send (default: 1)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Interval between sends in seconds (default: 1.0)")
+    parser.add_argument("--device-id", default=cfg.get("device_id", "sim_device_001"), help=f"Simulator device ID (default: {cfg.get('device_id', 'sim_device_001')})")
+    parser.add_argument("--count", type=int, default=None, help="Telemetry count to send (default: from payload config or 1)")
+    parser.add_argument("--interval", type=float, default=None, help="Interval between sends in seconds (default: from payload config or 1.0)")
     parser.add_argument("--duration", type=float, default=5.0, help="Listen duration in seconds (default: 5.0)")
     parser.add_argument("--timeout", type=float, default=3.0, help="CoAP request timeout in seconds (default: 3.0)")
 
@@ -283,23 +302,19 @@ def main():
     if args.port is None:
         args.port = cfg["port_tls"] if args.tls else cfg["port"]
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    rc = 0
-    try:
-        if args.mode == "connect":
-            rc = loop.run_until_complete(do_connect(args, cfg, logger))
-        elif args.mode == "send":
-            rc = loop.run_until_complete(do_send(args, cfg, logger))
-        elif args.mode == "listen":
-            rc = loop.run_until_complete(do_listen(args, cfg, logger))
-        else:
-            rc_send = loop.run_until_complete(do_send(args, cfg, logger))
-            rc_listen = loop.run_until_complete(do_listen(args, cfg, logger))
-            rc = rc_send if rc_send != 0 else rc_listen
-    finally:
-        loop.close()
+    if args.mode in ["send", "both"]:
+        rc = do_send_parallel(args, cfg, logger)
+    else:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        rc = 0
+        try:
+            if args.mode == "connect":
+                rc = loop.run_until_complete(do_connect(args, cfg, logger))
+            elif args.mode == "listen":
+                rc = loop.run_until_complete(do_listen(args, cfg, logger))
+        finally:
+            loop.close()
 
     sys.exit(rc)
 

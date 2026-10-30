@@ -1,0 +1,10 @@
+{
+  "interval": 1.0,
+  "count": 3,
+  "device_ids": ["http_01", "http_02"],
+  "attributes": [
+    { "fieldName": "temperature", "type": "double", "value": null, "min": 15.0, "max": 35.0 },
+    { "fieldName": "humidity", "type": "double", "value": null, "min": 40.0, "max": 80.0 },
+    { "fieldName": "status", "type": "string", "value": ["ONLINE", "STANDBY"], "min": null, "max": null }
+  ]
+}

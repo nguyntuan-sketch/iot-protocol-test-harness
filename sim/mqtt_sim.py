@@ -17,6 +17,8 @@ import time
 import json
 import logging
 import argparse
+import threading
+from typing import Tuple, List, Optional, Dict
 from datetime import datetime
 
 try:
@@ -32,7 +34,9 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result, classify_socket_error, tcp_preflight_probe, setup_simulator_logger
+    format_result, classify_socket_error, tcp_preflight_probe, setup_simulator_logger,
+    load_merged_config, resolve_password_from_file,
+    load_payload_config, generate_payload, run_devices_parallel
 )
 
 try:
@@ -48,40 +52,29 @@ except ImportError:
 
 
 def get_default_config():
-    cfg_path = os.path.join(base_dir, "config", "config.yaml")
+    raw = load_merged_config(base_dir)
+    target = raw.get("global", {})
+    mq = raw.get("adapters", {}).get("mqtt", {})
+    tls = raw.get("tls", {})
+    auth_cfg = mq.get("auth", {})
+
     cfg = {
-        "host": "127.0.0.1",
-        "port": 1883,
-        "port_tls": 8883,
-        "topic": "v1/devices/me/telemetry",
-        "username": "sim_device_001",
-        "password": "secret",
-        "client_id": "iot_sim_mqtt_001",
-        "qos": 1,
-        "keepalive": 60,
-        "tls_enabled": False,
-        "insecure_skip_verify": False
+        "host": target.get("target_host", "127.0.0.1"),
+        "port": mq.get("port", 1883),
+        "port_tls": mq.get("port_tls", tls.get("ports", {}).get("mqtt_tls", 8883)),
+        "topic": mq.get("topic", "v1/devices/me/telemetry"),
+        "username": auth_cfg.get("username") or mq.get("username", "sim_device_001"),
+        "password": auth_cfg.get("password") or mq.get("password", "secret"),
+        "username_env": auth_cfg.get("username_env", ""),
+        "password_env": auth_cfg.get("password_env", ""),
+        "password_file": auth_cfg.get("password_file", ""),
+        "client_id": mq.get("client_id", "iot_test_client_001"),
+        "qos": mq.get("qos", 1),
+        "keepalive": mq.get("keepalive", 60),
+        "tls_enabled": tls.get("enabled", False),
+        "insecure_skip_verify": tls.get("insecure_skip_verify", False),
+        "ca_cert": tls.get("ca_cert_path", "")
     }
-    if yaml and os.path.isfile(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                raw = yaml.safe_load(f)
-                target = raw.get("target", {})
-                mq = raw.get("adapters", {}).get("mqtt", {})
-                tls = raw.get("tls", {})
-                cfg["host"] = target.get("host", cfg["host"])
-                cfg["port"] = mq.get("port", cfg["port"])
-                cfg["port_tls"] = mq.get("port_tls", tls.get("ports", {}).get("mqtt_tls", cfg["port_tls"]))
-                cfg["topic"] = mq.get("topic", cfg["topic"])
-                cfg["username"] = mq.get("username", cfg["username"])
-                cfg["password"] = mq.get("password", cfg["password"])
-                cfg["client_id"] = mq.get("client_id", cfg["client_id"])
-                cfg["qos"] = mq.get("qos", cfg["qos"])
-                cfg["keepalive"] = mq.get("keepalive", cfg["keepalive"])
-                cfg["tls_enabled"] = tls.get("enabled", cfg["tls_enabled"])
-                cfg["insecure_skip_verify"] = tls.get("insecure_skip_verify", cfg["insecure_skip_verify"])
-        except Exception as e:
-            sys.stderr.write(f"[WARN] Failed to read config.yaml: {e}\n")
     return cfg
 
 
@@ -99,26 +92,57 @@ def main():
     parser.add_argument("--host", default=cfg["host"], help=f"Broker host (default: {cfg['host']})")
     parser.add_argument("--port", type=int, default=None, help="Broker port (default: 1883 or 8883 if --tls)")
     parser.add_argument("--topic", default=cfg["topic"], help=f"Telemetry publish topic (default: {cfg['topic']})")
-    parser.add_argument("--username", default=cfg["username"], help="MQTT username / device token")
-    parser.add_argument("--password", default=cfg["password"], help="MQTT password")
+    parser.add_argument("--username", default=None, help="MQTT username / device token (priority: CLI > env > config)")
+    parser.add_argument("--username-env", default=None, help="Environment variable name for MQTT username")
+    parser.add_argument("--password", default=None, help="MQTT password (priority: CLI > env > file > config)")
+    parser.add_argument("--password-env", default=None, help="Environment variable name for MQTT password")
+    parser.add_argument("--password-file", default=None, help="Path to text file containing MQTT password")
     parser.add_argument("--client-id", default=cfg["client_id"], help="MQTT Client ID")
     parser.add_argument("--qos", type=int, choices=[0, 1, 2], default=cfg["qos"], help="QoS level (default: 1)")
     parser.add_argument("--tls", action="store_true", default=cfg.get("tls_enabled", False), help="Enable MQTT TLS")
     parser.add_argument("--insecure", action="store_true", default=cfg.get("insecure_skip_verify", False),
                         help="Skip TLS certificate verification (insecure)")
-    parser.add_argument("--count", type=int, default=1, help="Telemetry count to send (default: 1)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Interval between sends in seconds (default: 1.0)")
+    parser.add_argument("--ca-cert", default=cfg.get("ca_cert", None), help="Path to CA certificate for TLS verification")
+    parser.add_argument("--count", type=int, default=None, help="Telemetry count to send (default: from payload config or 1)")
+    parser.add_argument("--interval", type=float, default=None, help="Interval between sends in seconds (default: from payload config or 1.0)")
     parser.add_argument("--duration", type=float, default=5.0, help="Listening duration in seconds (default: 5.0)")
     parser.add_argument("--timeout", type=float, default=3.0, help="Connection timeout in seconds (default: 3.0)")
 
     args = parser.parse_args()
+
+    # Resolve Username: CLI > env > config.auth > config.username
+    resolved_username = None
+    if args.username is not None:
+        resolved_username = args.username
+    elif args.username_env:
+        resolved_username = os.environ.get(args.username_env, "")
+    elif cfg["username_env"]:
+        resolved_username = os.environ.get(cfg["username_env"], "")
+    else:
+        resolved_username = cfg["username"]
+
+    # Resolve Password: CLI > env > file > config.auth > config.password
+    resolved_password = None
+    if args.password is not None:
+        resolved_password = args.password
+    elif args.password_env:
+        resolved_password = os.environ.get(args.password_env, "")
+    elif args.password_file:
+        resolved_password = resolve_password_from_file(args.password_file) or ""
+    elif cfg["password_env"]:
+        resolved_password = os.environ.get(cfg["password_env"], "")
+    elif cfg["password_file"]:
+        resolved_password = resolve_password_from_file(cfg["password_file"]) or ""
+    else:
+        resolved_password = cfg["password"]
+
     logger = setup_logger(args)
 
     if args.port is None:
         args.port = cfg["port_tls"] if args.tls else cfg["port"]
 
     logger.info(f"[*] Starting MQTT Simulator in '{args.mode}' mode (TLS: {args.tls})...")
-    logger.info(f"    Broker: {args.host}:{args.port} | Client ID: {args.client_id} | Username: {args.username}")
+    logger.info(f"    Broker: {args.host}:{args.port} | Client ID: {args.client_id} | Username: {resolved_username}")
 
     connected = False
     conn_rc = None
@@ -137,11 +161,13 @@ def main():
             logger.warning("[!] WARNING: TLS certificate verification is disabled (--insecure)")
             client.tls_set(cert_reqs=ssl.CERT_NONE)
             client.tls_insecure_set(True)
+        elif args.ca_cert and os.path.isfile(args.ca_cert):
+            client.tls_set(ca_certs=args.ca_cert, cert_reqs=ssl.CERT_REQUIRED)
         else:
             client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
 
-    if args.username:
-        client.username_pw_set(args.username, args.password)
+    if resolved_username:
+        client.username_pw_set(resolved_username, resolved_password if resolved_password is not None else None)
 
     def on_connect(client, userdata, flags, reason_code, properties):
         nonlocal connected, conn_rc
@@ -204,6 +230,152 @@ def main():
     if not is_connected:
         logger.error(f"[!] TCP connection failed to {args.host}:{args.port}: {probe_detail}")
         return format_result("mqtt", args.mode, probe_status, probe_detail, elapsed=probe_elapsed)
+
+    if args.mode in ["send", "both"]:
+        payload_cfg = load_payload_config("mqtt", logger=logger)
+        if payload_cfg:
+            device_ids = payload_cfg.get("device_ids") or [cfg["client_id"]]
+            attributes = payload_cfg.get("attributes", [])
+            default_count = payload_cfg.get("count", 1)
+            default_interval = payload_cfg.get("interval", 1.0)
+        else:
+            device_ids = [cfg["client_id"]]
+            attributes = None
+            default_count = 1
+            default_interval = 1.0
+
+        count = args.count if args.count is not None else default_count
+        interval = args.interval if args.interval is not None else default_interval
+
+        logger.info(f"[*] [MQTT SEND] Broker: {args.host}:{args.port} | Devices: {len(device_ids)} | Count: {count} | Interval: {interval}s")
+
+        def _mqtt_worker(dev_id: str, dev_logger: logging.Logger) -> Tuple[str, str]:
+            dev_client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id=dev_id)
+            if resolved_username:
+                dev_client.username_pw_set(resolved_username, password=resolved_password)
+            if args.tls:
+                context = ssl.create_default_context()
+                if args.insecure:
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+                elif cfg.get("ca_cert") and os.path.isfile(cfg["ca_cert"]):
+                    context.load_verify_locations(cfg["ca_cert"])
+                dev_client.tls_set_context(context)
+
+            conn_ev = threading.Event()
+            dev_conn_rc = [None]
+            dev_disc_before_conn = [False]
+
+            def _on_c(c, u, flags, rc, props=None):
+                dev_conn_rc[0] = rc
+                conn_ev.set()
+
+            def _on_d(c, u, flags, rc, props=None):
+                if dev_conn_rc[0] is None:
+                    dev_disc_before_conn[0] = True
+                conn_ev.set()
+
+            dev_client.on_connect = _on_c
+            dev_client.on_disconnect = _on_d
+
+            try:
+                dev_client.connect(args.host, args.port, keepalive=cfg.get("keepalive", 60))
+                dev_client.loop_start()
+            except ssl.SSLError as se:
+                dev_logger.error(f"[!] TLS handshake error: {se}")
+                return STATUS_AUTH_FAILED, f"AUTH_FAILED (SSLError: {se})"
+            except (ConnectionRefusedError, OSError) as e:
+                st, det, _ = classify_socket_error(e, stage="tcp_connect")
+                dev_logger.error(f"[!] Socket connection error to {args.host}:{args.port}: {e}")
+                return st, f"{st} ({e})"
+            except Exception as e:
+                dev_logger.error(f"[!] Unexpected error during MQTT connect: {e}")
+                return STATUS_PROTO_ERROR, f"PROTO_ERROR ({e})"
+
+            # Wait for CONNACK
+            if not conn_ev.wait(timeout=args.timeout):
+                try:
+                    dev_client.disconnect()
+                except Exception:
+                    pass
+                dev_client.loop_stop()
+                dev_logger.error(f"[!] MQTT Connection timeout waiting for CONNACK")
+                return STATUS_TIMEOUT, f"TIMEOUT after {args.timeout}s"
+
+            if dev_disc_before_conn[0] and dev_conn_rc[0] is None:
+                try:
+                    dev_client.disconnect()
+                except Exception:
+                    pass
+                dev_client.loop_stop()
+                dev_logger.error(f"[!] Broker closed connection immediately without CONNACK")
+                return STATUS_PROTO_ERROR, "PROTO_ERROR (closed before CONNACK)"
+
+            rc = dev_conn_rc[0]
+            rc_val = getattr(rc, "value", rc)
+            try:
+                rc_val = int(rc_val)
+            except Exception:
+                rc_val = 0 if str(rc_val).lower() in ("success", "0") else 1
+
+            if rc_val != 0:
+                try:
+                    dev_client.disconnect()
+                except Exception:
+                    pass
+                dev_client.loop_stop()
+                if rc_val in (4, 5, 134, 135):
+                    return STATUS_AUTH_FAILED, f"AUTH_FAILED (rc={rc_val})"
+                elif rc_val in (1, 2, 130, 132, 133):
+                    return STATUS_PROTO_ERROR, f"PROTO_ERROR (rc={rc_val})"
+                else:
+                    return STATUS_REFUSED, f"REFUSED (rc={rc_val})"
+
+            # Publish loop
+            pub_count = 0
+            dev_t0 = time.time()
+            i = 0
+            while True:
+                i += 1
+                if count is not None and i > count:
+                    break
+                if count is None and (time.time() - dev_t0 >= args.duration):
+                    break
+
+                if attributes is not None:
+                    telemetry = generate_payload(attributes, device_id=dev_id, seq=i, logger=dev_logger)
+                else:
+                    telemetry = {
+                        "device_id": dev_id,
+                        "seq": i,
+                        "temperature": round(26.5 + i * 0.3, 2),
+                        "humidity": round(55.0 - i * 0.1, 2),
+                        "status": "ONLINE",
+                        "timestamp": int(time.time() * 1000)
+                    }
+                body = json.dumps(telemetry)
+                inf = dev_client.publish(args.topic, body, qos=args.qos)
+                dev_logger.info(f"[{datetime.now().isoformat()}] ---> PUBLISH topic='{args.topic}' | MID={inf.mid} | QoS={args.qos} | Payload: {body}")
+                inf.wait_for_publish(timeout=args.timeout)
+                if inf.is_published():
+                    pub_count += 1
+                else:
+                    dev_logger.warning(f"[!] PUBACK not received within {args.timeout}s for MID {inf.mid}")
+
+                if count is not None and i < count:
+                    time.sleep(interval)
+                elif count is None:
+                    time.sleep(interval)
+
+            try:
+                dev_client.disconnect()
+            except Exception:
+                pass
+            dev_client.loop_stop()
+            return STATUS_OK, f"OK x{pub_count}"
+
+        max_dev_timeout = (args.timeout * (count or 5) + (interval * (count or 5)) + 5.0) if count else (args.duration + 5.0)
+        return run_devices_parallel("mqtt", args.mode, device_ids, _mqtt_worker, timeout_per_device=max_dev_timeout, args=args, logger=logger)
 
     try:
         client.connect(args.host, args.port, keepalive=cfg.get("keepalive", 60))

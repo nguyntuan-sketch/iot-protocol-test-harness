@@ -34,8 +34,11 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result, classify_socket_error, tcp_preflight_probe, setup_simulator_logger
+    format_result, classify_socket_error, tcp_preflight_probe, setup_simulator_logger,
+    load_merged_config, resolve_password_from_file,
+    load_payload_config, generate_payload, run_devices_parallel
 )
+from typing import Tuple, List, Optional, Dict
 
 try:
     import yaml
@@ -51,37 +54,26 @@ except ImportError:
 
 
 def get_default_config():
-    cfg_path = os.path.join(base_dir, "config", "config.yaml")
+    raw = load_merged_config(base_dir)
+    target = raw.get("global", {})
+    xm = raw.get("adapters", {}).get("xmpp", {})
+    tls = raw.get("tls", {})
+    auth_cfg = xm.get("auth", {})
+
     cfg = {
-        "host": "127.0.0.1",
-        "port": 5222,
-        "port_tls": 5223,
-        "client_jid": "sim_device_001@iot.local",
-        "client_password": "secret",
-        "target_adapter_jid": "adapter@iot.local",
-        "message_type": "chat",
-        "tls_enabled": False,
-        "insecure_skip_verify": False
+        "host": target.get("target_host", "127.0.0.1"),
+        "port": xm.get("port", 5222),
+        "port_tls": tls.get("ports", {}).get("xmpp_tls", 5223),
+        "client_jid": auth_cfg.get("client_jid") or xm.get("client_jid", "sim_device_001@iot.local"),
+        "client_password": auth_cfg.get("client_password") or xm.get("client_password", "secret"),
+        "password_env": auth_cfg.get("password_env", ""),
+        "password_file": auth_cfg.get("password_file", ""),
+        "target_adapter_jid": xm.get("target_adapter_jid", "adapter@iot.local"),
+        "device_id": target.get("device_id", "sim_device_001"),
+        "message_type": xm.get("message_type", "chat"),
+        "tls_enabled": tls.get("enabled", False),
+        "insecure_skip_verify": tls.get("insecure_skip_verify", False)
     }
-    if yaml and os.path.isfile(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                raw = yaml.safe_load(f)
-                target = raw.get("target", {})
-                xm = raw.get("adapters", {}).get("xmpp", {})
-                tls = raw.get("tls", {})
-                cfg["host"] = target.get("host", cfg["host"])
-                cfg["port"] = xm.get("port", cfg["port"])
-                cfg["client_jid"] = xm.get("client_jid", cfg["client_jid"])
-                cfg["client_password"] = xm.get("client_password", cfg["client_password"])
-                cfg["target_adapter_jid"] = xm.get("target_adapter_jid", cfg["target_adapter_jid"])
-                cfg["message_type"] = xm.get("message_type", cfg["message_type"])
-                cfg["tls_enabled"] = tls.get("enabled", cfg["tls_enabled"])
-                cfg["insecure_skip_verify"] = tls.get("insecure_skip_verify", cfg["insecure_skip_verify"])
-                ports = tls.get("ports", {})
-                cfg["port_tls"] = ports.get("xmpp_tls", cfg["port_tls"])
-        except Exception as e:
-            sys.stderr.write(f"[WARN] Failed to read config.yaml: {e}\n")
     return cfg
 
 
@@ -290,6 +282,121 @@ async def run_xmpp_sim(args, cfg, logger):
     return format_result("xmpp", args.mode, STATUS_OK, detail, stage="channel")
 
 
+def do_send_parallel(args, cfg, logger):
+    payload_cfg = load_payload_config("xmpp", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or [cfg.get("device_id", "sim_device_001")]
+        attributes = payload_cfg.get("attributes", [])
+        default_count = payload_cfg.get("count", 1)
+        default_interval = payload_cfg.get("interval", 1.0)
+    else:
+        device_ids = [cfg.get("device_id", "sim_device_001")]
+        attributes = None
+        default_count = 1
+        default_interval = 1.0
+
+    count = args.count if args.count is not None else default_count
+    interval = args.interval if args.interval is not None else default_interval
+
+    logger.info(f"[*] [XMPP SEND] Server: {args.host}:{args.port} | Devices: {len(device_ids)} | Count: {count} | Interval: {interval}s")
+
+    is_connected, status, detail, elapsed = tcp_preflight_probe(args.host, args.port, timeout=args.timeout)
+    if not is_connected:
+        logger.error(f"[!] TCP connect failed to {args.host}:{args.port}: {detail}")
+        return format_result("xmpp", args.mode, status, detail, elapsed=elapsed)
+
+    def _xmpp_worker(dev_id: str, dev_logger: logging.Logger) -> Tuple[str, str]:
+        sub_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(sub_loop)
+
+        domain = args.jid.split("@")[1] if "@" in args.jid else "iot.local"
+        dev_jid = dev_id if "@" in dev_id else f"{dev_id}@{domain}"
+
+        async def _async_run():
+            client = XMPPSimClient(
+                jid=dev_jid,
+                password=args.password,
+                target_jid=args.target_jid,
+                mode=args.mode,
+                count=count,
+                interval=interval,
+                duration=args.duration,
+                logger=dev_logger
+            )
+            if args.tls:
+                client.use_ssl = True
+                client.use_starttls = False
+            else:
+                client.use_ssl = False
+                client.use_starttls = True
+
+            if args.insecure:
+                client.ssl_context.check_hostname = False
+                client.ssl_context.verify_mode = ssl.CERT_NONE
+
+            client.register_plugin('xep_0030')
+            client.register_plugin('xep_0199')
+            client.current_stage = "stream_open"
+
+            try:
+                client.connect((args.host, args.port))
+            except Exception as e:
+                st, det, _ = classify_socket_error(e, stage=client.current_stage)
+                return st, det
+
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(client.session_started.wait()),
+                    asyncio.create_task(client.auth_failed.wait()),
+                    asyncio.create_task(client.conn_failed.wait())
+                ],
+                timeout=args.timeout,
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            for p in pending:
+                p.cancel()
+
+            if client.auth_failed.is_set():
+                client.disconnect()
+                return STATUS_AUTH_FAILED, f"AUTH_FAILED (SASL not-authorized)"
+            if client.conn_failed.is_set():
+                client.disconnect()
+                return STATUS_PROTO_ERROR, f"PROTO_ERROR ({client.conn_error_detail})"
+            if not client.session_started.is_set():
+                client.disconnect()
+                return STATUS_TIMEOUT, f"TIMEOUT after {args.timeout}s"
+
+            sent_count = 0
+            for i in range(1, count + 1):
+                if attributes is not None:
+                    telemetry = generate_payload(attributes, device_id=dev_id, seq=i, logger=dev_logger)
+                else:
+                    telemetry = {
+                        "device_id": dev_id,
+                        "seq": i,
+                        "temperature": round(24.0 + i * 0.2, 2),
+                        "humidity": round(58.0 - i * 0.5, 2),
+                        "timestamp": int(time.time() * 1000)
+                    }
+                body = json.dumps(telemetry)
+                client.send_message(mto=args.target_jid, mbody=body, mtype='chat')
+                dev_logger.info(f"[{datetime.now().isoformat()}] ---> XMPP MESSAGE sent to {args.target_jid}: {body}")
+                sent_count += 1
+                if i < count:
+                    await asyncio.sleep(interval)
+
+            client.disconnect()
+            return STATUS_OK, f"OK x{sent_count}"
+
+        try:
+            return sub_loop.run_until_complete(_async_run())
+        finally:
+            sub_loop.close()
+
+    max_dev_timeout = (args.timeout * (count or 5) + (interval * (count or 5)) + 5.0)
+    return run_devices_parallel("xmpp", args.mode, device_ids, _xmpp_worker, timeout_per_device=max_dev_timeout, args=args, logger=logger)
+
+
 def main():
     cfg = get_default_config()
     parser = argparse.ArgumentParser(
@@ -301,27 +408,50 @@ def main():
     parser.add_argument("--host", default=cfg["host"], help=f"XMPP Server host (default: {cfg['host']})")
     parser.add_argument("--port", type=int, default=None, help="XMPP Server port (default: 5222 or 5223 if --tls)")
     parser.add_argument("--jid", default=cfg["client_jid"], help=f"Client JID (default: {cfg['client_jid']})")
-    parser.add_argument("--password", default=cfg["client_password"], help="Client Password")
+    parser.add_argument("--password", default=None, help="Client Password (priority: CLI > env > file > config)")
+    parser.add_argument("--password-env", default=None, help="Environment variable name for XMPP password")
+    parser.add_argument("--password-file", default=None, help="Path to text file containing XMPP password")
     parser.add_argument("--target-jid", default=cfg["target_adapter_jid"], help="Target Adapter JID")
     parser.add_argument("--tls", action="store_true", default=cfg.get("tls_enabled", False), help="Enable XMPP Direct TLS (port 5223)")
     parser.add_argument("--insecure", action="store_true", default=cfg.get("insecure_skip_verify", False), help="Skip TLS certificate verification")
-    parser.add_argument("--count", type=int, default=1, help="Message count to send (default: 1)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Interval between sends in seconds (default: 1.0)")
+    parser.add_argument("--count", type=int, default=None, help="Message count to send (default: from payload config or 1)")
+    parser.add_argument("--interval", type=float, default=None, help="Interval between sends in seconds (default: from payload config or 1.0)")
     parser.add_argument("--duration", type=float, default=5.0, help="Listening duration in seconds (default: 5.0)")
     parser.add_argument("--timeout", type=float, default=3.0, help="Timeout in seconds (default: 3.0)")
 
     args = parser.parse_args()
+
+    # Resolve Password: CLI > env > file > config.auth > config.password
+    resolved_password = None
+    if args.password is not None:
+        resolved_password = args.password
+    elif args.password_env:
+        resolved_password = os.environ.get(args.password_env, "")
+    elif args.password_file:
+        resolved_password = resolve_password_from_file(args.password_file) or ""
+    elif cfg["password_env"]:
+        resolved_password = os.environ.get(cfg["password_env"], "")
+    elif cfg["password_file"]:
+        resolved_password = resolve_password_from_file(cfg["password_file"]) or ""
+    else:
+        resolved_password = cfg["client_password"]
+
+    args.password = resolved_password
+
     logger = setup_logger(args)
 
     if args.port is None:
         args.port = cfg["port_tls"] if args.tls else cfg["port"]
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        rc = loop.run_until_complete(run_xmpp_sim(args, cfg, logger))
-    finally:
-        loop.close()
+    if args.mode in ["send", "both"]:
+        rc = do_send_parallel(args, cfg, logger)
+    else:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            rc = loop.run_until_complete(run_xmpp_sim(args, cfg, logger))
+        finally:
+            loop.close()
 
     sys.exit(rc)
 

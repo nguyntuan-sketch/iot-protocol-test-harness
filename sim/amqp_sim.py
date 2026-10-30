@@ -32,7 +32,9 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result, classify_socket_error, tcp_preflight_probe, setup_simulator_logger
+    format_result, classify_socket_error, tcp_preflight_probe, setup_simulator_logger,
+    load_merged_config, resolve_password_from_file,
+    load_payload_config, generate_payload, run_devices_parallel
 )
 
 try:
@@ -57,42 +59,40 @@ except ImportError:
 
 
 def get_default_config():
-    cfg_path = os.path.join(base_dir, "config", "config.yaml")
+    raw = load_merged_config(base_dir)
+    target = raw.get("global", {})
+    aq = raw.get("adapters", {}).get("amqp", {})
+    tls = raw.get("tls", {})
+    auth_cfg = aq.get("auth", {})
+
     cfg = {
-        "host": "127.0.0.1",
-        "port": 5672,
-        "port_tls": 5671,
-        "vhost": "/",
-        "username": "guest",
-        "password": "guest",
-        "exchange": "iot.telemetry",
-        "routing_key": "device.telemetry",
-        "queue": "iot.telemetry.queue",
+        "host": target.get("target_host", "127.0.0.1"),
+        "port": aq.get("port", 5672),
+        "port_tls": tls.get("ports", {}).get("amqp_tls", 5671),
+        "vhost": aq.get("vhost", "/"),
+        "username": auth_cfg.get("username") or aq.get("username", "guest"),
+        "password": auth_cfg.get("password") or aq.get("password", "guest"),
+        "username_env": auth_cfg.get("username_env", ""),
+        "password_env": auth_cfg.get("password_env", ""),
+        "password_file": auth_cfg.get("password_file", ""),
+        "exchange": aq.get("exchange", "iot.telemetry"),
+        "routing_key": aq.get("routing_key", "device.telemetry"),
+        "queue": aq.get("queue", "iot.telemetry.queue"),
         "downlink_queue": "iot.downlink.queue",
-        "tls_enabled": False,
-        "insecure_skip_verify": False
+        "tls_enabled": tls.get("enabled", False),
+        "insecure_skip_verify": tls.get("insecure_skip_verify", False),
+        "count": 1,
+        "interval": 1.0,
     }
-    if yaml and os.path.isfile(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                raw = yaml.safe_load(f)
-                target = raw.get("target", {})
-                aq = raw.get("adapters", {}).get("amqp", {})
-                tls = raw.get("tls", {})
-                cfg["host"] = target.get("host", cfg["host"])
-                cfg["port"] = aq.get("port", cfg["port"])
-                cfg["vhost"] = aq.get("vhost", cfg["vhost"])
-                cfg["username"] = aq.get("username", cfg["username"])
-                cfg["password"] = aq.get("password", cfg["password"])
-                cfg["exchange"] = aq.get("exchange", cfg["exchange"])
-                cfg["routing_key"] = aq.get("routing_key", cfg["routing_key"])
-                cfg["queue"] = aq.get("queue", cfg["queue"])
-                cfg["tls_enabled"] = tls.get("enabled", cfg["tls_enabled"])
-                cfg["insecure_skip_verify"] = tls.get("insecure_skip_verify", cfg["insecure_skip_verify"])
-                ports = tls.get("ports", {})
-                cfg["port_tls"] = ports.get("amqp_tls", cfg["port_tls"])
-        except Exception as e:
-            sys.stderr.write(f"[WARN] Failed to read config.yaml: {e}\n")
+    try:
+        p_cfg = load_payload_config("amqp")
+        if p_cfg:
+            if "count" in p_cfg:
+                cfg["count"] = p_cfg["count"]
+            if "interval" in p_cfg:
+                cfg["interval"] = p_cfg["interval"]
+    except Exception:
+        pass
     return cfg
 
 
@@ -115,6 +115,115 @@ def extract_amqp_error_detail(e: Exception) -> str:
     return msg
 
 
+def do_send_parallel(args, cfg, logger):
+    payload_cfg = load_payload_config("amqp", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or [args.device_id]
+        attributes = payload_cfg.get("attributes", [])
+        default_count = payload_cfg.get("count", 1)
+        default_interval = payload_cfg.get("interval", 1.0)
+    else:
+        device_ids = [args.device_id]
+        attributes = None
+        default_count = 1
+        default_interval = 1.0
+
+    count = args.count if args.count is not None else default_count
+    interval = args.interval if args.interval is not None else default_interval
+
+    logger.info(f"[*] [AMQP SEND] Broker: {args.host}:{args.port} | Devices: {len(device_ids)} | Count: {count} | Interval: {interval}s")
+
+    credentials = pika.PlainCredentials(args.username, args.password)
+    ssl_options = None
+    if args.tls:
+        context = ssl.create_default_context()
+        if args.insecure:
+            logger.warning("[!] WARNING: TLS certificate verification is disabled (--insecure)")
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        else:
+            context.verify_mode = ssl.CERT_REQUIRED
+        ssl_options = pika.SSLOptions(context)
+
+    parameters = pika.ConnectionParameters(
+        host=args.host,
+        port=args.port,
+        virtual_host=args.vhost,
+        credentials=credentials,
+        ssl_options=ssl_options,
+        connection_attempts=1,
+        retry_delay=1,
+        socket_timeout=args.timeout
+    )
+
+    def send_amqp_device(dev_id: str, dev_logger) -> str:
+        dev_logger.info(f"[*] AMQP client initializing for device '{dev_id}'...")
+        conn = None
+        try:
+            conn = pika.BlockingConnection(parameters)
+            ch = conn.channel()
+            ch.confirm_delivery()
+            try:
+                ch.exchange_declare(exchange=args.exchange, exchange_type='direct', durable=True)
+                ch.queue_declare(queue=args.queue, durable=True)
+                ch.queue_bind(queue=args.queue, exchange=args.exchange, routing_key=args.routing_key)
+            except Exception as e:
+                dev_logger.warning(f"[!] Note on declare/bind: {e}")
+
+            for seq in range(1, count + 1):
+                if attributes:
+                    telemetry = generate_payload(attributes, device_id=dev_id, seq=seq)
+                else:
+                    telemetry = {
+                        "device_id": dev_id,
+                        "seq": seq,
+                        "voltage": round(220.0 + seq * 0.5, 2),
+                        "current": round(2.5 + seq * 0.1, 2),
+                        "timestamp": int(time.time() * 1000)
+                    }
+                body = json.dumps(telemetry)
+                props = pika.BasicProperties(
+                    content_type='application/json',
+                    delivery_mode=pika.DeliveryMode.Persistent,
+                    headers={"device_id": dev_id, "timestamp": telemetry.get("timestamp", int(time.time() * 1000))}
+                )
+                ch.basic_publish(
+                    exchange=args.exchange,
+                    routing_key=args.routing_key,
+                    body=body.encode('utf-8'),
+                    properties=props,
+                    mandatory=True
+                )
+                dev_logger.info(f"[{datetime.now().isoformat()}] ---> [DEVICE {dev_id}] AMQP BASIC_PUBLISH [CONFIRMED ACK] seq={seq} | Payload: {body}")
+                if seq < count:
+                    time.sleep(interval)
+            try:
+                ch.close()
+                conn.close()
+            except Exception:
+                pass
+            return STATUS_OK, f"sent {count} msgs"
+        except Exception as e:
+            err_msg = extract_amqp_error_detail(e)
+            dev_logger.error(f"[!] Device '{dev_id}' publish failed: {err_msg}")
+            if conn and not conn.is_closed:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            raise
+
+    return run_devices_parallel(
+        "amqp",
+        "send",
+        device_ids,
+        send_amqp_device,
+        timeout_per_device=args.timeout * count + 5.0,
+        args=args,
+        logger=logger,
+    )
+
+
 def main():
     cfg = get_default_config()
     parser = argparse.ArgumentParser(
@@ -126,8 +235,11 @@ def main():
     parser.add_argument("--host", default=cfg["host"], help=f"AMQP Broker host (default: {cfg['host']})")
     parser.add_argument("--port", type=int, default=None, help="AMQP Broker port (default: 5672 or 5671 if --tls)")
     parser.add_argument("--vhost", default=cfg["vhost"], help=f"Virtual host (default: {cfg['vhost']})")
-    parser.add_argument("--username", default=cfg["username"], help="Username")
-    parser.add_argument("--password", default=cfg["password"], help="Password")
+    parser.add_argument("--username", default=None, help="AMQP Username (priority: CLI > env > config)")
+    parser.add_argument("--username-env", default=None, help="Environment variable name for AMQP username")
+    parser.add_argument("--password", default=None, help="AMQP Password (priority: CLI > env > file > config)")
+    parser.add_argument("--password-env", default=None, help="Environment variable name for AMQP password")
+    parser.add_argument("--password-file", default=None, help="Path to text file containing AMQP password")
     parser.add_argument("--exchange", default=cfg["exchange"], help=f"Target Exchange (default: {cfg['exchange']})")
     parser.add_argument("--routing-key", default=cfg["routing_key"], help=f"Routing Key (default: {cfg['routing_key']})")
     parser.add_argument("--queue", default=cfg["queue"], help=f"Telemetry Queue (default: {cfg['queue']})")
@@ -136,12 +248,42 @@ def main():
     parser.add_argument("--tls", action="store_true", default=cfg.get("tls_enabled", False), help="Enable AMQP TLS/SSL")
     parser.add_argument("--insecure", action="store_true", default=cfg.get("insecure_skip_verify", False),
                         help="Skip TLS certificate verification (insecure)")
-    parser.add_argument("--count", type=int, default=1, help="Message count to send (default: 1)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Interval between sends in seconds (default: 1.0)")
+    parser.add_argument("--count", type=int, default=None, help="Message count to send (default: from payload config or 1)")
+    parser.add_argument("--interval", type=float, default=None, help="Interval between sends in seconds (default: from payload config or 1.0)")
     parser.add_argument("--duration", type=float, default=5.0, help="Listening duration in seconds (default: 5.0)")
     parser.add_argument("--timeout", type=float, default=3.0, help="Connection timeout in seconds (default: 3.0)")
 
     args = parser.parse_args()
+
+    # Resolve Username: CLI > env > config.auth > config.username
+    resolved_username = None
+    if args.username is not None:
+        resolved_username = args.username
+    elif args.username_env:
+        resolved_username = os.environ.get(args.username_env, "")
+    elif cfg["username_env"]:
+        resolved_username = os.environ.get(cfg["username_env"], "")
+    else:
+        resolved_username = cfg["username"]
+
+    # Resolve Password: CLI > env > file > config.auth > config.password
+    resolved_password = None
+    if args.password is not None:
+        resolved_password = args.password
+    elif args.password_env:
+        resolved_password = os.environ.get(args.password_env, "")
+    elif args.password_file:
+        resolved_password = resolve_password_from_file(args.password_file) or ""
+    elif cfg["password_env"]:
+        resolved_password = os.environ.get(cfg["password_env"], "")
+    elif cfg["password_file"]:
+        resolved_password = resolve_password_from_file(cfg["password_file"]) or ""
+    else:
+        resolved_password = cfg["password"]
+
+    args.username = resolved_username
+    args.password = resolved_password
+
     logger = setup_logger(args)
 
     if args.port is None:
@@ -157,6 +299,9 @@ def main():
     if not is_connected:
         logger.error(f"[!] TCP connection refused / failed to {args.host}:{args.port}: {probe_detail}")
         return format_result("amqp", args.mode, probe_status, probe_detail, elapsed=probe_elapsed)
+
+    if args.mode == "send":
+        return do_send_parallel(args, cfg, logger)
 
     credentials = pika.PlainCredentials(args.username, args.password)
     ssl_options = None

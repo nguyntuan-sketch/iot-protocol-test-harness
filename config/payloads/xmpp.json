@@ -1,0 +1,13 @@
+{
+  "interval": 1.0,
+  "count": 3,
+  "device_ids": [
+    "xmpp_dev_01",
+    "xmpp_dev_02"
+  ],
+  "attributes": [
+    { "fieldName": "power", "type": "double", "value": null, "min": 200.0, "max": 240.0 },
+    { "fieldName": "alert_level", "type": "string", "value": ["NORMAL", "WARNING"], "min": null, "max": null }
+  ]
+}
+

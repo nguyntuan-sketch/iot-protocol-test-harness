@@ -1,0 +1,20 @@
+{
+  "interval": 0.05,
+  "count": 1,
+  "device_ids": [
+    "mqtt_d1",
+    "mqtt_d2",
+    "mqtt_d3",
+    "mqtt_d4",
+    "mqtt_d5"
+  ],
+  "attributes": [
+    {
+      "fieldName": "temperature",
+      "type": "double",
+      "value": null,
+      "min": 20.0,
+      "max": 30.0
+    }
+  ]
+}

@@ -164,7 +164,7 @@ if (Test-Path "payloads\sample_tftp_file.txt") {
 Write-Host ""
 
 # ─── SECTION 4: Python Libraries (Group A) ──────────────────
-Write-Host "[ 4/6 ] Python Libraries - Group A (9 Protocols + Utilities)" -ForegroundColor Magenta
+Write-Host "[ 4/6 ] Python Libraries - Group A (10 Protocols + Utilities)" -ForegroundColor Magenta
 
 if (-not $SkipLibCheck) {
     if (Test-Path "check_libs.py") {
@@ -300,7 +300,7 @@ Write-Host "  Warnings      : $($script:WarnCount)" -ForegroundColor Yellow
 Write-Host ""
 
 if ($script:FailCount -eq 0) {
-    Write-Host "  STATUS: [SIMULATORS READY (platform not verified)] All 11 protocols, tools, configs and payloads verified!" -ForegroundColor Green
+    Write-Host "  STATUS: [SIMULATORS READY (platform not verified)] All 13 protocols, tools, configs and payloads verified!" -ForegroundColor Green
 } elseif ($script:FailCount -le 2) {
     Write-Host "  STATUS: [PARTIALLY READY] Fix minor failures above before test execution" -ForegroundColor Yellow
 } else {
@@ -309,7 +309,7 @@ if ($script:FailCount -eq 0) {
 
 Write-Host ""
 Write-Host "  Coverage Summary:" -ForegroundColor Cyan
-Write-Host "    Group A (Python): HTTP MQTT CoAP XMPP AMQP DDS WebSocket TCP/UDP TFTP"
+Write-Host "    Group A (Python): HTTP MQTT CoAP XMPP AMQP DDS WebSocket TCP/UDP TFTP FTP"
 Write-Host "    Group B (Tools) : LwM2M (Leshan JAR) | LoRaWAN (Semtech UDP Forwarder)"
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan

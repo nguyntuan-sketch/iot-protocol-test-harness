@@ -34,8 +34,9 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result, classify_socket_error
-, setup_simulator_logger)
+    format_result, classify_socket_error, setup_simulator_logger,
+    load_payload_config, generate_payload, run_devices_parallel
+)
 
 try:
     import yaml
@@ -57,7 +58,9 @@ def get_default_config():
         "host": "127.0.0.1",
         "port": 1700,
         "gateway_eui": "AA555A0000000001",
-        "dev_eui": "0004A30B001A2B3C"
+        "dev_eui": "0004A30B001A2B3C",
+        "count": 1,
+        "interval": 1.0,
     }
     if yaml and os.path.isfile(cfg_path):
         try:
@@ -71,17 +74,110 @@ def get_default_config():
                 cfg["dev_eui"] = lw.get("dev_eui", cfg["dev_eui"])
         except Exception as e:
             sys.stderr.write(f"[WARN] Failed to read config.yaml: {e}\n")
+    try:
+        p_cfg = load_payload_config("lorawan")
+        if p_cfg:
+            if "count" in p_cfg:
+                cfg["count"] = p_cfg["count"]
+            if "interval" in p_cfg:
+                cfg["interval"] = p_cfg["interval"]
+    except Exception:
+        pass
     return cfg
 
 
 def setup_logger(args=None):
     return setup_simulator_logger("lorawan", args=args)
 
+
+def do_send_parallel(args, cfg, gw_eui_bytes, logger):
+    payload_cfg = load_payload_config("lorawan", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or [args.dev_eui]
+        attributes = payload_cfg.get("attributes", [])
+        default_count = payload_cfg.get("count", 1)
+        default_interval = payload_cfg.get("interval", 1.0)
+    else:
+        device_ids = [args.dev_eui]
+        attributes = None
+        default_count = 1
+        default_interval = 1.0
+
+    count = args.count if args.count is not None else default_count
+    interval = args.interval if args.interval is not None else default_interval
+
+    logger.info(f"[*] [LoRaWAN SEND] Server: {args.host}:{args.port} | Devices: {len(device_ids)} | Count: {count} | Interval: {interval}s")
+
+    def send_lorawan_device(dev_id: str, dev_logger) -> str:
+        dev_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        dev_sock.settimeout(args.timeout)
+        push_ack_count = 0
+        try:
+            for seq in range(1, count + 1):
+                token = random.randint(0, 0xFFFF)
+                token_msb = (token >> 8) & 0xFF
+                token_lsb = token & 0xFF
+                header = struct.pack("!BBBB", PROTOCOL_VERSION, token_msb, token_lsb, PKT_PUSH_DATA) + gw_eui_bytes
+
+                if attributes:
+                    sensor_data = generate_payload(attributes, device_id=dev_id, seq=seq)
+                else:
+                    sensor_data = {
+                        "device_id": dev_id,
+                        "seq": seq,
+                        "temp": round(24.5 + seq * 0.2, 2),
+                        "humidity": round(60.0 - seq * 0.3, 2),
+                        "timestamp": int(time.time() * 1000)
+                    }
+
+                dummy_payload = json.dumps(sensor_data).encode('utf-8')
+                b64_payload = base64.b64encode(dummy_payload).decode('ascii')
+                rxpk = {
+                    "rxpk": [{
+                        "time": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000000Z"),
+                        "tmst": int(time.time() * 1000000) & 0xFFFFFFFF,
+                        "chan": 0, "rfch": 0, "freq": 868.100000, "stat": 1,
+                        "modu": "LORA", "datr": "SF7BW125", "codr": "4/5", "rssi": -65,
+                        "lsnr": 9.2, "size": len(dummy_payload), "data": b64_payload
+                    }]
+                }
+                packet = header + json.dumps(rxpk).encode('utf-8')
+                dev_logger.info(f"[{datetime.now().isoformat()}] ---> [DEVICE {dev_id}] PUSH_DATA token=0x{token:04X} ({len(packet)}B) | Sensor: {sensor_data}")
+                try:
+                    dev_sock.sendto(packet, (args.host, args.port))
+                    resp, addr = dev_sock.recvfrom(1024)
+                    if len(resp) >= 4 and resp[0] == PROTOCOL_VERSION and resp[3] == PKT_PUSH_ACK:
+                        resp_token = (resp[1] << 8) | resp[2]
+                        if resp_token == token:
+                            dev_logger.info(f"     [PUSH_ACK VERIFIED] token=0x{resp_token:04X}")
+                            push_ack_count += 1
+                except socket.timeout:
+                    dev_logger.warning(f"[!] Device '{dev_id}' PUSH_DATA timeout (No PUSH_ACK from {args.host}:{args.port})")
+                except (ConnectionRefusedError, OSError) as ce:
+                    dev_logger.error(f"[!] Device '{dev_id}' socket error: {ce}")
+                    raise
+
+                if seq < count:
+                    time.sleep(interval)
+            return STATUS_OK, f"sent {count} packets (ACKs: {push_ack_count})"
+        finally:
+            dev_sock.close()
+
+    return run_devices_parallel(
+        "lorawan",
+        "send",
+        device_ids,
+        send_lorawan_device,
+        timeout_per_device=args.timeout * count + 5.0,
+        args=args,
+        logger=logger,
+    )
+
 def main():
     cfg = get_default_config()
     parser = argparse.ArgumentParser(
         description="LoRaWAN IoT Protocol Simulator CLI (Semtech UDP v2 Forwarder)",
-        epilog="Chế độ 'connect' gửi PULL_DATA và xác thực token PULL_ACK. Không hỗ trợ TLS."
+        epilog="Chế độ 'connect' gửi PULL_DATA và xác thực token PULL_ACK. Không hỗ trợ TLS. Lưu ý: LoRaWAN không có xác thực ở tầng giao thức (bảo mật nằm trong frame MIC và AppSKey/NwkSKey)."
     )
     parser.add_argument("--mode", choices=["connect", "send", "listen", "both"], default="connect",
                         help="Operating mode: 'connect', 'send', 'listen', or 'both' (default: connect)")
@@ -91,8 +187,8 @@ def main():
     parser.add_argument("--dev-eui", default=cfg["dev_eui"], help=f"Device EUI (default: {cfg['dev_eui']})")
     parser.add_argument("--tls", action="store_true", help="Request TLS (Not supported for Semtech UDP)")
     parser.add_argument("--insecure", action="store_true", help="Unused for LoRaWAN")
-    parser.add_argument("--count", type=int, default=1, help="Uplink count to send (default: 1)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Interval between sends in seconds (default: 1.0)")
+    parser.add_argument("--count", type=int, default=None, help="Uplink count to send (default: from payload config or 1)")
+    parser.add_argument("--interval", type=float, default=None, help="Interval between sends in seconds (default: from payload config or 1.0)")
     parser.add_argument("--duration", type=float, default=5.0, help="Listen duration in seconds (default: 5.0)")
     parser.add_argument("--timeout", type=float, default=3.0, help="UDP ACK timeout in seconds (default: 3.0)")
 
@@ -106,6 +202,9 @@ def main():
     if len(gw_eui_bytes) != 8:
         logger.error(f"[!] Gateway EUI must be 8 bytes (16 hex chars). Got: {args.gateway_eui}")
         return format_result("lorawan", args.mode, STATUS_PROTO_ERROR, f"Invalid Gateway EUI length ({args.gateway_eui})", stage="init")
+
+    if args.mode == "send":
+        return do_send_parallel(args, cfg, gw_eui_bytes, logger)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(args.timeout)

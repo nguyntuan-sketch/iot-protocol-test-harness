@@ -1,0 +1,27 @@
+{
+  "interval": 1.0,
+  "count": 3,
+  "device_ids": [
+    "coap_dev_01",
+    "coap_dev_02"
+  ],
+  "attributes": [
+    {
+      "fieldName": "light",
+      "type": "double",
+      "value": null,
+      "min": 100.0,
+      "max": 800.0
+    },
+    {
+      "fieldName": "motion",
+      "type": "string",
+      "value": [
+        "DETECTED",
+        "CLEAR"
+      ],
+      "min": null,
+      "max": null
+    }
+  ]
+}

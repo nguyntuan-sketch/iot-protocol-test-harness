@@ -52,6 +52,7 @@ tls:
     lwm2m_dtls: 5684
     xmpp_tls: 5223
     amqp_tls: 5671
+    ftp_tls: 21
 
 # ─── Negative Test Cases Declaration ────────────────────────
 negative_cases:
@@ -65,7 +66,7 @@ negative_cases:
   unregistered_lwm2m_endpoint: "unregistered_device_999"
   invalid_lorawan_data: "AAAAAAAAAAAAAAAAAAAA" # Invalid MIC / payload
 
-# ─── 11 Protocol Adapters Configuration ─────────────────────
+# ─── 12 Protocol Adapters Configuration ─────────────────────
 adapters:
   # ─── Protocol #1: HTTP (Item A4) ──────────────────────────
   http:
@@ -78,6 +79,11 @@ adapters:
     headers:
       Content-Type: "application/json"
       X-Authorization: "Bearer test_token_http" # TODO: xác nhận header key (Authorization vs X-Authorization)
+    auth:
+      header_key: ""
+      header_value: ""
+      header_value_env: ""
+      extra_headers: {}
 
   # ─── Protocol #2: MQTT (Item A6) ──────────────────────────
   mqtt:
@@ -89,6 +95,12 @@ adapters:
     qos: 1
     keepalive: 60
     client_id: "iot_test_client_001"
+    auth:
+      username: ""
+      password: ""
+      username_env: ""
+      password_env: ""
+      password_file: ""
     # Note (Item A6): Từ paho-mqtt >= 2.0.0 bắt buộc dùng:
     # mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=...)
 
@@ -108,6 +120,11 @@ adapters:
     client_password: "secret"
     target_adapter_jid: "adapter@iot.local"
     message_type: "chat"
+    auth:
+      client_jid: ""
+      client_password: ""
+      password_env: ""
+      password_file: ""
 
   # ─── Protocol #5: AMQP ────────────────────────────────────
   amqp:
@@ -120,6 +137,12 @@ adapters:
     routing_key: "device.telemetry"
     queue: "iot.telemetry.queue"
     confirm_delivery: true
+    auth:
+      username: ""
+      password: ""
+      username_env: ""
+      password_env: ""
+      password_file: ""
 
   # ─── Protocol #6: DDS (Item A5) ───────────────────────────
   dds:
@@ -158,6 +181,11 @@ adapters:
     path: "/ws/telemetry"
     ping_interval: 20
     ping_timeout: 10
+    auth:
+      header_key: ""
+      header_value: ""
+      header_value_env: ""
+      extra_headers: {}
 
   # ─── Protocol #10: TCP/UDP Raw Socket ─────────────────────
   tcp_udp:
@@ -173,3 +201,20 @@ adapters:
     local_upload_file: "payloads/sample_tftp_file.txt"
     block_size: 512
     timeout_sec: 10
+
+  # ─── Protocol #12: FTP ─────────────────────────────────────
+  ftp:
+    port: 21
+    port_tls: 21
+    username: "sim_device_001"
+    password: "secret"
+    anonymous: false
+    remote_filename: "telemetry.txt"
+    local_upload_file: "payloads/sample_tftp_file.txt"
+    timeout_sec: 3.0
+    auth:
+      username: ""
+      password: ""
+      username_env: ""
+      password_env: ""
+      password_file: ""

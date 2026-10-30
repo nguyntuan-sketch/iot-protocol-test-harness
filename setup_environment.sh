@@ -153,7 +153,7 @@ echo "  Failed checks : $FailCount"
 echo "  Warnings      : $WarnCount"
 echo ""
 if [ "$FailCount" -eq 0 ]; then
-    echo -e "\033[32m  STATUS: [SIMULATORS READY (platform not verified)] All 11 protocols, tools, configs and payloads verified!\033[0m"
+    echo -e "\033[32m  STATUS: [SIMULATORS READY (platform not verified)] All 13 protocols, tools, configs and payloads verified!\033[0m"
 else
     echo -e "\033[31m  STATUS: [FAILURES DETECTED] Review items above\033[0m"
 fi

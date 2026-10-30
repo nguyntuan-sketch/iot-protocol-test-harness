@@ -16,6 +16,7 @@ import time
 import logging
 import argparse
 import subprocess
+import threading
 from datetime import datetime
 
 try:
@@ -31,7 +32,8 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result, setup_simulator_logger
+    format_result, setup_simulator_logger,
+    load_payload_config, generate_payload, run_devices_parallel
 )
 
 try:
@@ -180,23 +182,144 @@ def find_real_java_executable(logger=None) -> str:
 
 def cleanup_process(proc, logger, hJob=None):
     """Ensure child Java process and its process tree are terminated and not left orphan."""
-    if proc and proc.poll() is None:
-        logger.debug(f"[*] Terminating Leshan Java process PID {proc.pid}...")
+    if proc:
+        if proc.poll() is None:
+            logger.debug(f"[*] Terminating Leshan Java process PID {proc.pid}...")
+            try:
+                if sys.platform == "win32":
+                    subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                                   capture_output=True, text=True, timeout=5)
+                proc.kill()
+            except Exception as e:
+                logger.warning(f"[!] Warning terminating process: {e}")
         try:
-            if sys.platform == "win32":
-                subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-                               capture_output=True, text=True, timeout=5)
-            proc.kill()
-            proc.wait(timeout=2.0)
+            proc.wait(timeout=3.0)
             logger.debug(f"[*] Java process PID {proc.pid} exited.")
-        except Exception as e:
-            logger.warning(f"[!] Warning terminating process: {e}")
+        except Exception:
+            pass
     if hJob and sys.platform == "win32":
         try:
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
             kernel32.CloseHandle(hJob)
         except Exception:
             pass
+
+
+def do_send_parallel(args, cfg, logger):
+    payload_cfg = load_payload_config("lwm2m", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or [args.endpoint]
+        attributes = payload_cfg.get("attributes", [])
+        default_count = payload_cfg.get("count", 1)
+        default_interval = payload_cfg.get("interval", 1.0)
+    else:
+        device_ids = [args.endpoint]
+        attributes = None
+        default_count = 1
+        default_interval = 1.0
+
+    count = args.count if args.count is not None else default_count
+    interval = args.interval if args.interval is not None else default_interval
+
+    if args.server_uri is None:
+        if args.tls:
+            server_uri = f"coaps://{cfg['host']}:{cfg['port_tls']}"
+        else:
+            server_uri = cfg["server_uri"]
+    else:
+        server_uri = args.server_uri
+
+    java_bin = find_real_java_executable(logger)
+    exec_duration = args.duration
+
+    logger.info(f"[*] [LwM2M SEND] Server: {server_uri} | Devices: {len(device_ids)} | Duration: {exec_duration}s")
+
+    def send_lwm2m_device(dev_id: str, dev_logger) -> str:
+        dev_cmd = [java_bin, "-jar", args.jar, "-u", server_uri, "-n", dev_id]
+        if args.tls:
+            if args.psk_id and args.psk_key:
+                dev_cmd.extend(["-i", args.psk_id, "-p", args.psk_key])
+
+        dev_logger.info(f"[*] Starting Leshan client for device '{dev_id}'...")
+        dev_hJob = _create_lwm2m_job()
+        dev_proc = None
+        dev_lines = []
+        dev_reader_th = None
+
+        def _dev_reader(p, out_list):
+            try:
+                for line in p.stdout:
+                    out_list.append(line)
+            except Exception:
+                pass
+
+        try:
+            dev_proc = subprocess.Popen(
+                dev_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                encoding="utf-8",
+                errors="replace"
+            )
+            if dev_hJob and sys.platform == "win32":
+                try:
+                    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                    kernel32.AssignProcessToJobObject(dev_hJob, dev_proc._handle)
+                except Exception:
+                    pass
+            dev_logger.info(f"[*] Spawned Leshan Java PID {dev_proc.pid} for device '{dev_id}'")
+
+            dev_reader_th = threading.Thread(target=_dev_reader, args=(dev_proc, dev_lines), daemon=True)
+            dev_reader_th.start()
+
+            t0 = time.time()
+            while time.time() - t0 < exec_duration:
+                content = "".join(dev_lines)
+                if "Registered with location" in content:
+                    break
+                if "4.01" in content or "4.03" in content:
+                    break
+                time.sleep(0.1)
+        finally:
+            cleanup_process(dev_proc, dev_logger, dev_hJob)
+            if dev_reader_th:
+                dev_reader_th.join(timeout=2.0)
+            if dev_proc and dev_proc.stdout:
+                try:
+                    dev_proc.stdout.close()
+                except Exception:
+                    pass
+
+        raw_output = "".join(dev_lines)
+        if "Registered with location" in raw_output:
+            loc = "Registered with location"
+            for line in raw_output.splitlines():
+                if "Registered with location" in line:
+                    loc = line.strip()
+                    break
+            dev_logger.info(f"[*] Device '{dev_id}' registered: {loc}")
+            return STATUS_OK, f"{loc}"
+        elif "4.01" in raw_output or "4.03" in raw_output or "Unauthorized" in raw_output:
+            dev_logger.error(f"[!] Device '{dev_id}' registration rejected (4.01/4.03)")
+            return STATUS_AUTH_FAILED, "Registration rejected (4.01/4.03 Unauthorized)"
+        elif "Trying to register to" in raw_output:
+            dev_logger.error(f"[!] Device '{dev_id}' registration timeout (server silent)")
+            return STATUS_TIMEOUT, f"Registration timeout after {exec_duration}s (server {server_uri} silent)"
+        else:
+            first_line = raw_output.splitlines()[0] if raw_output.splitlines() else "No output from client"
+            return STATUS_PROTO_ERROR, f"Client failed: {first_line}"
+
+    return run_devices_parallel(
+        "lwm2m",
+        "send",
+        device_ids,
+        send_lwm2m_device,
+        timeout_per_device=exec_duration + 5.0,
+        args=args,
+        logger=logger,
+    )
 
 
 def main():
@@ -213,6 +336,8 @@ def main():
     parser.add_argument("--tls", action="store_true", default=cfg.get("tls_enabled", False), help="Use coaps:// DTLS")
     parser.add_argument("--psk-id", default=cfg.get("psk_identity"), help="PSK Identity for DTLS (-i)")
     parser.add_argument("--psk-key", default=cfg.get("psk_key"), help="Pre-shared Key in hex for DTLS (-p)")
+    parser.add_argument("--count", type=int, default=None, help="Message count to send (default: from payload config or 1)")
+    parser.add_argument("--interval", type=float, default=None, help="Interval between sends in seconds (default: from payload config or 1.0)")
     parser.add_argument("--duration", type=float, default=8.0, help="Execution duration in seconds (default: 8.0)")
     parser.add_argument("--timeout", type=float, default=5.0, help="Registration timeout in seconds (default: 5.0)")
 
@@ -222,6 +347,9 @@ def main():
     if not os.path.isfile(args.jar):
         logger.error(f"[!] Leshan JAR file not found at: {args.jar}")
         return format_result("lwm2m", args.mode, STATUS_PROTO_ERROR, f"Leshan JAR not found at {args.jar}", stage="init")
+
+    if args.mode == "send":
+        return do_send_parallel(args, cfg, logger)
 
     if args.server_uri is None:
         if args.tls:
@@ -243,55 +371,77 @@ def main():
     logger.info(f"    Command: {' '.join(cmd)}")
     logger.info(f"    Target Server: {server_uri} | Endpoint: {args.endpoint}")
 
-    temp_log = os.path.join(base_dir, "logs", "lwm2m_runtime_raw.log")
     exec_duration = args.timeout if args.mode == "connect" else args.duration
+
+    # Remove any stale runtime raw log from disk
+    temp_log = os.path.join(base_dir, "logs", "lwm2m_runtime_raw.log")
+    if os.path.isfile(temp_log):
+        try:
+            os.remove(temp_log)
+        except OSError:
+            pass
 
     hJob = _create_lwm2m_job()
     proc = None
-    try:
-        with open(temp_log, "w", encoding="utf-8") as f:
-            proc = subprocess.Popen(
-                cmd,
-                stdout=f,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL
-            )
-            if hJob and sys.platform == "win32":
-                try:
-                    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-                    kernel32.AssignProcessToJobObject(hJob, proc._handle)
-                except Exception:
-                    pass
-            logger.info(f"[*] Spawned Leshan Java PID: {proc.pid}")
+    captured_lines = []
+    reader_thread = None
 
-            t0 = time.time()
-            reg_found = False
-            while time.time() - t0 < exec_duration:
-                # Check raw log dynamically
-                if os.path.isfile(temp_log):
-                    with open(temp_log, "r", encoding="utf-8", errors="replace") as rf:
-                        content = rf.read()
-                        if "Registered with location" in content:
-                            reg_found = True
-                            break
-                        if "4.01" in content or "4.03" in content:
-                            break
-                time.sleep(0.3)
+    def _reader(p, out_list):
+        try:
+            for line in p.stdout:
+                out_list.append(line)
+        except Exception:
+            pass
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+        if hJob and sys.platform == "win32":
+            try:
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.AssignProcessToJobObject(hJob, proc._handle)
+            except Exception:
+                pass
+        logger.info(f"[*] Spawned Leshan Java PID: {proc.pid}")
+
+        reader_thread = threading.Thread(target=_reader, args=(proc, captured_lines), daemon=True)
+        reader_thread.start()
+
+        t0 = time.time()
+        while time.time() - t0 < exec_duration:
+            content = "".join(captured_lines)
+            if "Registered with location" in content:
+                break
+            if "4.01" in content or "4.03" in content:
+                break
+            time.sleep(0.1)
     except Exception as e:
         logger.error(f"[!] Failed to execute Leshan client: {e}")
         return format_result("lwm2m", args.mode, STATUS_PROTO_ERROR, f"Execution failed: {e}", stage="init")
     finally:
         cleanup_process(proc, logger, hJob)
-        if os.path.isfile(temp_log):
+        if reader_thread:
+            reader_thread.join(timeout=2.0)
+        if proc and proc.stdout:
             try:
-                os.remove(temp_log)
+                proc.stdout.close()
             except Exception:
                 pass
 
-    raw_output = ""
-    if os.path.isfile(temp_log):
-        with open(temp_log, "r", encoding="utf-8", errors="replace") as f:
-            raw_output = f.read()
+    raw_output = "".join(captured_lines)
+    retries = 0
+    while not raw_output and retries < 3:
+        retries += 1
+        logger.debug(f"[*] Raw output empty, retry {retries}/3 waiting for output...")
+        time.sleep(0.2)
+        raw_output = "".join(captured_lines)
 
     logger.info("=== [LESHAN RUNTIME RAW LOG START] ===")
     for line in raw_output.splitlines():

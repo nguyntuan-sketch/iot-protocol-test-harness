@@ -1,0 +1,14 @@
+{
+  "interval": 2,
+  "count": 5,
+  "device_ids": [
+    "udp_dev_01",
+    "udp_dev_02"
+  ],
+  "attributes": [
+    { "fieldName": "speed_kmh", "type": "double", "value": null, "min": 0.0, "max": 120.0 },
+    { "fieldName": "rpm", "type": "int", "value": null, "min": 800, "max": 6000 },
+    { "fieldName": "engine_status", "type": "string", "value": ["RUNNING", "IDLE", "STOPPED"], "min": null, "max": null }
+  ]
+}
+

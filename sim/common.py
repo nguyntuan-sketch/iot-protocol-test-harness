@@ -8,8 +8,13 @@ import sys
 import os
 import socket
 import time
+import re
 import logging
-from typing import Any, Optional
+import json
+import random
+import string
+import concurrent.futures
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # Ensure console supports UTF-8 on Windows
 try:
@@ -131,6 +136,90 @@ def tcp_preflight_probe(host: str, port: int, timeout: float = 3.0) -> tuple[boo
                 pass
 
 
+
+def load_merged_config(base_dir: Optional[str] = None) -> dict:
+    """
+    Loads central configuration with hierarchical overrides:
+    1. config/config.yaml (base configuration)
+    2. config/config.local.yaml (optional local overrides, git-ignored)
+    Returns merged dictionary.
+    """
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    config = {}
+    cfg_base_path = os.path.join(base_dir, "config", "config.yaml")
+    cfg_local_path = os.path.join(base_dir, "config", "config.local.yaml")
+
+    try:
+        import yaml
+    except ImportError:
+        yaml = None
+
+    if yaml and os.path.isfile(cfg_base_path):
+        try:
+            with open(cfg_base_path, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f) or {}
+        except Exception as e:
+            sys.stderr.write(f"[WARN] Failed to read config.yaml: {e}\n")
+
+    if yaml and os.path.isfile(cfg_local_path):
+        try:
+            with open(cfg_local_path, "r", encoding="utf-8") as f:
+                local_cfg = yaml.safe_load(f) or {}
+
+            def _deep_merge(target: dict, source: dict):
+                for k, v in source.items():
+                    if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+                        _deep_merge(target[k], v)
+                    else:
+                        target[k] = v
+
+            _deep_merge(config, local_cfg)
+        except Exception as e:
+            sys.stderr.write(f"[WARN] Failed to read config.local.yaml: {e}\n")
+
+    return config
+
+
+def resolve_password_from_file(file_path: Optional[str]) -> Optional[str]:
+    """
+    Reads password/secret from a text file, stripping whitespace and newline characters.
+    """
+    if not file_path:
+        return None
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read().strip("\r\n\t ")
+    except Exception as e:
+        sys.stderr.write(f"[WARN] Failed to read credential from file '{file_path}': {e}\n")
+        return None
+
+
+def validate_http_header_name(key: str) -> bool:
+    """
+    Validates HTTP header field name against RFC 7230 / RFC 9110 token specification.
+    Must not contain CR, LF, or control characters.
+    """
+    if not key or not isinstance(key, str):
+        return False
+    # RFC 7230 token = 1*tchar
+    return bool(re.match(r"^[a-zA-Z0-9!#$%&'*+\-.^_`|~]+$", key))
+
+
+def validate_http_header_value(value: str) -> bool:
+    """
+    Validates HTTP header field value.
+    Must not contain CR, LF, or ASCII control characters (0-31, 127).
+    """
+    if value is None or not isinstance(value, str):
+        return False
+    for ch in value:
+        code = ord(ch)
+        if code in (10, 13) or code < 32 or code == 127:
+            return False
+    return True
+
+
 # ─── Standardized Secure Logger Setup with Credential Redaction ───────────────
 
 _SHARED_REDACTOR = None
@@ -147,16 +236,7 @@ def get_shared_redactor():
             sys.path.insert(0, base_dir)
         from runner.redact import Redactor
 
-        config = None
-        config_path = os.path.join(base_dir, "config", "config.yaml")
-        if os.path.isfile(config_path):
-            try:
-                import yaml
-
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config = yaml.safe_load(f)
-            except Exception:
-                pass
+        config = load_merged_config(base_dir)
         _SHARED_REDACTOR = Redactor(config=config)
     except Exception:
         _SHARED_REDACTOR = None
@@ -168,8 +248,13 @@ def register_simulator_args(args: Any) -> None:
     r = get_shared_redactor()
     if r and hasattr(args, "__dict__"):
         for k, v in vars(args).items():
-            if isinstance(v, str) and any(w in k.lower() for w in ("token", "password", "secret", "psk", "key")):
+            if isinstance(v, str) and any(w in k.lower() for w in ("token", "password", "secret", "psk", "key", "header_value")):
                 r.add_secret(v)
+            elif isinstance(v, list) and k == "headers":
+                for item in v:
+                    if isinstance(item, str) and "=" in item:
+                        _, val = item.split("=", 1)
+                        r.add_secret(val.strip())
 
 
 class RedactingFilter(logging.Filter):
@@ -255,4 +340,246 @@ def setup_simulator_logger(proto: str, log_filename: Optional[str] = None, args:
         logger.addHandler(ch)
 
     return logger
+
+
+def load_payload_config(proto: str, base_dir: Optional[str] = None, logger: Optional[logging.Logger] = None) -> Optional[dict]:
+    """
+    Load device payload configuration from config/payloads/<proto>.json.
+    Returns dict if found, or None with warning if missing.
+    """
+    if not base_dir:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    cfg_file = os.path.join(base_dir, "config", "payloads", f"{proto}.json")
+    if os.path.isfile(cfg_file):
+        try:
+            with open(cfg_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            msg = f"[!] Cảnh báo: Lỗi đọc file {cfg_file}: {e}, dùng payload mặc định"
+            if logger:
+                logger.warning(msg)
+            else:
+                print(msg, file=sys.stderr)
+            return None
+    else:
+        msg = f"[!] Cảnh báo: không tìm thấy config/payloads/{proto}.json, dùng payload mặc định"
+        if logger:
+            logger.warning(msg)
+        else:
+            print(msg, file=sys.stderr)
+        return None
+
+
+def generate_payload(
+    attributes: list,
+    device_id: Optional[str] = None,
+    seq: Optional[int] = None,
+    logger: Optional[logging.Logger] = None,
+) -> dict:
+    """
+    Generate dynamic payload according to attributes schema:
+    - value is list -> random.choice(value), ignoring min/max
+    - value is not None and not list -> value verbatim
+    - value is None:
+        - double/float -> random in [min(a,b), max(a,b)] with round(..., 2)
+        - long/int -> random integer in [min(a,b), max(a,b)]
+        - string -> random alphanumeric string of length in [min(a,b), max(a,b)]
+        - bool -> random choice [True, False]
+    Normalizes min/max order via min()/max() and logs normalization if min > max.
+    """
+    payload = {}
+    seen_fields: Dict[str, str] = {}
+    for attr in attributes:
+        fname = attr.get("fieldName")
+        if not fname:
+            continue
+        atype = str(attr.get("type", "string")).lower()
+        if fname in seen_fields:
+            prev_type = seen_fields[fname]
+            warn_msg = f"[!] Cảnh báo: fieldName '{fname}' bị trùng lặp trong attributes (type trước: '{prev_type}', type sau: '{atype}'), giá trị sau sẽ ghi đè giá trị trước"
+            if logger:
+                logger.warning(warn_msg)
+            else:
+                print(warn_msg, flush=True)
+        seen_fields[fname] = atype
+
+        val = attr.get("value")
+
+        if isinstance(val, list):
+            payload[fname] = random.choice(val)
+        elif val is not None:
+            payload[fname] = val
+        else:
+            raw_min = attr.get("min")
+            raw_max = attr.get("max")
+
+            if atype in ("double", "float"):
+                a = float(raw_min) if raw_min is not None else 0.0
+                b = float(raw_max) if raw_max is not None else (a + 50.0 if raw_min is not None else 100.0)
+                norm_min, norm_max = min(a, b), max(a, b)
+                if a > b:
+                    log_msg = f"[*] Chuẩn hóa khoảng giá trị cho '{fname}': [{a}, {b}] -> [{norm_min}, {norm_max}]"
+                    if logger:
+                        logger.info(log_msg)
+                    else:
+                        print(log_msg)
+                payload[fname] = round(random.uniform(norm_min, norm_max), 2)
+
+            elif atype in ("long", "int", "integer"):
+                a = int(raw_min) if raw_min is not None else 0
+                b = int(raw_max) if raw_max is not None else (a + 100 if raw_min is not None else 100)
+                norm_min, norm_max = min(a, b), max(a, b)
+                if a > b:
+                    log_msg = f"[*] Chuẩn hóa khoảng giá trị cho '{fname}': [{a}, {b}] -> [{norm_min}, {norm_max}]"
+                    if logger:
+                        logger.info(log_msg)
+                    else:
+                        print(log_msg)
+                payload[fname] = random.randint(norm_min, norm_max)
+
+            elif atype in ("string", "str"):
+                a = int(raw_min) if raw_min is not None else 6
+                b = int(raw_max) if raw_max is not None else 10
+                norm_min, norm_max = max(1, min(a, b)), max(1, max(a, b))
+                if a > b:
+                    log_msg = f"[*] Chuẩn hóa khoảng giá trị cho '{fname}': [{a}, {b}] -> [{norm_min}, {norm_max}]"
+                    if logger:
+                        logger.info(log_msg)
+                    else:
+                        print(log_msg)
+                str_len = random.randint(norm_min, norm_max)
+                chars = string.ascii_letters + string.digits
+                payload[fname] = "".join(random.choice(chars) for _ in range(str_len))
+
+            elif atype in ("bool", "boolean"):
+                payload[fname] = random.choice([True, False])
+            else:
+                payload[fname] = str(val) if val is not None else ""
+
+    if device_id is not None and "device_id" not in payload:
+        payload["device_id"] = device_id
+    if seq is not None and "seq" not in payload:
+        payload["seq"] = seq
+    if "timestamp" not in payload:
+        payload["timestamp"] = int(time.time() * 1000)
+
+    return payload
+
+
+def setup_device_logger(proto: str, device_id: str, args: Any = None) -> logging.Logger:
+    """
+    Creates an isolated logger for a specific device thread, writing to:
+    logs/<proto>_<8_first_chars_of_device_id>.log
+    Every line prefixed with [device:<id>].
+    """
+    if args is not None:
+        register_simulator_args(args)
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_dir = os.path.join(base_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "_", str(device_id))[:8]
+    log_filename = f"{proto}_{safe_id}.log"
+    log_file = os.path.join(log_dir, log_filename)
+
+    logger_name = f"{proto}_sim_{device_id}"
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(logging.DEBUG)
+
+    redactor = get_shared_redactor()
+    redacting_filter = RedactingFilter(redactor=redactor)
+    logger.addFilter(redacting_filter)
+
+    # Avoid duplicate handlers if setup_device_logger called multiple times
+    if not logger.handlers:
+        file_formatter = RedactingFormatter(
+            f"[device:{device_id}] %(asctime)s [%(levelname)s] %(message)s",
+            redactor=redactor
+        )
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(file_formatter)
+        fh.addFilter(redacting_filter)
+        logger.addHandler(fh)
+
+        stream_formatter = RedactingFormatter(
+            f"[device:{device_id}] %(message)s",
+            redactor=redactor
+        )
+        ch = logging.StreamHandler(sys.stdout)
+        ch.setLevel(logging.INFO)
+        ch.setFormatter(stream_formatter)
+        ch.addFilter(redacting_filter)
+        logger.addHandler(ch)
+
+    return logger
+
+
+def run_devices_parallel(
+    proto: str,
+    mode: str,
+    device_ids: List[str],
+    worker_fn: Callable[[str, logging.Logger], Tuple[str, str]],
+    timeout_per_device: Optional[float] = None,
+    args: Any = None,
+    logger: Optional[logging.Logger] = None,
+) -> int:
+    """
+    Executes worker_fn in parallel for each device_id on dedicated threads.
+    Aggregates results using strict priority:
+    AUTH_FAILED > REFUSED > TIMEOUT > PROTO_ERROR > OK
+    Formats single RESULT line and returns integer exit code.
+    """
+    if not device_ids:
+        device_ids = ["sim_device_001"]
+
+    if len(device_ids) > 50:
+        warning_msg = "[!] Cảnh báo: số lượng thiết bị lớn có thể gây quá tải adapter khi test"
+        if logger:
+            logger.warning(warning_msg)
+        else:
+            print(warning_msg, flush=True)
+
+    results: Dict[str, Tuple[str, str]] = {}
+    max_workers = min(len(device_ids), 50)
+
+    def _safe_worker(d_id: str) -> Tuple[str, str, str]:
+        dev_log = setup_device_logger(proto, d_id, args=args)
+        try:
+            st, summary = worker_fn(d_id, dev_log)
+            return d_id, st, summary
+        except Exception as exc:
+            if dev_log:
+                dev_log.error(f"[!] Device worker exception: {exc}")
+            return d_id, STATUS_PROTO_ERROR, f"PROTO_ERROR ({type(exc).__name__})"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {executor.submit(_safe_worker, d_id): d_id for d_id in device_ids}
+        wait_timeout = (timeout_per_device * 1.5) if timeout_per_device else None
+        done, not_done = concurrent.futures.wait(future_map.keys(), timeout=wait_timeout)
+
+        for fut in done:
+            d_id = future_map[fut]
+            try:
+                _, st, summary = fut.result()
+                results[d_id] = (st, summary)
+            except Exception as exc:
+                results[d_id] = (STATUS_PROTO_ERROR, f"PROTO_ERROR ({type(exc).__name__})")
+
+        for fut in not_done:
+            d_id = future_map[fut]
+            results[d_id] = (STATUS_TIMEOUT, "TIMEOUT (thread timed out)")
+
+    # Status priority: AUTH_FAILED > REFUSED > TIMEOUT > PROTO_ERROR > OK
+    STATUS_PRIORITY = [STATUS_AUTH_FAILED, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_PROTO_ERROR, STATUS_OK]
+    overall_status = STATUS_OK
+    for p in STATUS_PRIORITY:
+        if any(res[0] == p for res in results.values()):
+            overall_status = p
+            break
+
+    detail = ", ".join(f"{d_id}: {results[d_id][1]}" for d_id in device_ids if d_id in results)
+    return format_result(proto, mode, overall_status, detail)
+
 

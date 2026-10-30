@@ -30,8 +30,9 @@ if base_dir not in sys.path:
 from sim.common import (
     EXIT_OK, EXIT_PROTO_ERROR, EXIT_REFUSED, EXIT_TIMEOUT, EXIT_AUTH_FAILED,
     STATUS_OK, STATUS_REFUSED, STATUS_TIMEOUT, STATUS_AUTH_FAILED, STATUS_PROTO_ERROR,
-    format_result
-, setup_simulator_logger)
+    format_result, setup_simulator_logger,
+    load_payload_config, generate_payload, run_devices_parallel
+)
 
 try:
     import yaml
@@ -67,7 +68,9 @@ def get_default_config():
     cfg_path = os.path.join(base_dir, "config", "config.yaml")
     cfg = {
         "domain_id": 0,
-        "topic_name": "IoTTelemetryTopic"
+        "topic_name": "IoTTelemetryTopic",
+        "count": 1,
+        "interval": 1.0,
     }
     if yaml and os.path.isfile(cfg_path):
         try:
@@ -78,17 +81,100 @@ def get_default_config():
                 cfg["topic_name"] = dds.get("topic_name", cfg["topic_name"])
         except Exception as e:
             sys.stderr.write(f"[WARN] Failed to read config.yaml: {e}\n")
+    try:
+        p_cfg = load_payload_config("dds")
+        if p_cfg:
+            if "count" in p_cfg:
+                cfg["count"] = p_cfg["count"]
+            if "interval" in p_cfg:
+                cfg["interval"] = p_cfg["interval"]
+    except Exception:
+        pass
     return cfg
 
 
 def setup_logger(args=None):
     return setup_simulator_logger("dds", args=args)
 
+
+def do_send_parallel(args, cfg, participant, topic, logger):
+    payload_cfg = load_payload_config("dds", logger=logger)
+    if payload_cfg:
+        device_ids = payload_cfg.get("device_ids") or [args.device_id]
+        attributes = payload_cfg.get("attributes", [])
+        default_count = payload_cfg.get("count", 1)
+        default_interval = payload_cfg.get("interval", 1.0)
+    else:
+        device_ids = [args.device_id]
+        attributes = None
+        default_count = 1
+        default_interval = 1.0
+
+    count = args.count if args.count is not None else default_count
+    interval = args.interval if args.interval is not None else default_interval
+
+    logger.info(f"[*] [DDS SEND] Domain: {args.domain_id} | Topic: {args.topic} | Devices: {len(device_ids)} | Count: {count} | Interval: {interval}s")
+
+    def send_dds_device(dev_id: str, dev_logger) -> str:
+        dev_logger.info(f"[*] DDS DataWriter initializing for device '{dev_id}' on topic '{args.topic}'...")
+        writer = DataWriter(participant, topic)
+
+        # Check publication matched status
+        t_match_start = time.time()
+        matched_count = 0
+        while time.time() - t_match_start < args.timeout:
+            status = writer.get_publication_matched_status()
+            matched_count = getattr(status, "current_count", 0)
+            if matched_count > 0:
+                break
+            time.sleep(0.2)
+
+        dev_logger.info(f"[*] Matched remote DataReader count for device '{dev_id}': {matched_count}")
+
+        for seq in range(1, count + 1):
+            if attributes:
+                telemetry_dict = generate_payload(attributes, device_id=dev_id, seq=seq)
+                sample = Telemetry(
+                    device_id=dev_id,
+                    timestamp=int64(int(telemetry_dict.get("timestamp", time.time() * 1000))),
+                    temperature=float(telemetry_dict.get("temperature", 25.0)),
+                    humidity=float(telemetry_dict.get("humidity", 50.0)),
+                    status=str(telemetry_dict.get("status", "NORMAL"))
+                )
+            else:
+                sample = Telemetry(
+                    device_id=dev_id,
+                    timestamp=int64(int(time.time() * 1000)),
+                    temperature=float(25.0 + seq * 0.5),
+                    humidity=float(50.0 - seq * 0.2),
+                    status="NORMAL"
+                )
+            writer.write(sample)
+            dev_logger.info(f"[{datetime.now().isoformat()}] ---> [DEVICE {dev_id}] DDS WRITE: temp={sample.temperature}, hum={sample.humidity}, status='{sample.status}'")
+            if seq < count:
+                time.sleep(interval)
+
+        if matched_count == 0:
+            dev_logger.warning(f"[!] Write completed locally for device '{dev_id}' but publication_matched_status.current_count is 0")
+            return STATUS_TIMEOUT, f"publication_matched_status.current_count=0 after {args.timeout}s"
+
+        return STATUS_OK, f"sent {count} samples"
+
+    return run_devices_parallel(
+        "dds",
+        "send",
+        device_ids,
+        send_dds_device,
+        timeout_per_device=args.timeout + count * interval + 5.0,
+        args=args,
+        logger=logger,
+    )
+
 def main():
     cfg = get_default_config()
     parser = argparse.ArgumentParser(
         description="DDS IoT Protocol Simulator CLI (CycloneDDS native)",
-        epilog="Chế độ 'connect' phát hiện participant từ xa qua BuiltinTopicDcpsParticipant. Không hỗ trợ TLS (dùng DDS-SEC)."
+        epilog="Chế độ 'connect' phát hiện participant từ xa qua BuiltinTopicDcpsParticipant. Không hỗ trợ TLS (dùng DDS-SEC). Lưu ý: DDS không có xác thực ở tầng giao thức."
     )
     parser.add_argument("--mode", choices=["connect", "send", "listen", "both"], default="connect",
                         help="Operating mode: 'connect', 'send', 'listen', or 'both' (default: connect)")
@@ -97,8 +183,8 @@ def main():
     parser.add_argument("--device-id", default="sim_dds_001", help="Device ID")
     parser.add_argument("--tls", action="store_true", help="Request TLS (Not supported in DDS; uses DDS-Security)")
     parser.add_argument("--insecure", action="store_true", help="Unused for DDS")
-    parser.add_argument("--count", type=int, default=1, help="Samples count to write (default: 1)")
-    parser.add_argument("--interval", type=float, default=1.0, help="Interval between writes in seconds (default: 1.0)")
+    parser.add_argument("--count", type=int, default=None, help="Samples count to write (default: from payload config or 1)")
+    parser.add_argument("--interval", type=float, default=None, help="Interval between writes in seconds (default: from payload config or 1.0)")
     parser.add_argument("--duration", type=float, default=5.0, help="Listening duration in seconds (default: 5.0)")
     parser.add_argument("--timeout", type=float, default=3.0, help="Discovery/Match timeout in seconds (default: 3.0)")
 
@@ -119,6 +205,9 @@ def main():
     except Exception as e:
         logger.error(f"[!] Cannot initialize DDS DomainParticipant (domain={args.domain_id}): {e}")
         return format_result("dds", args.mode, STATUS_PROTO_ERROR, f"Participant initialization failed: {e}", stage="init")
+
+    if args.mode == "send":
+        return do_send_parallel(args, cfg, participant, topic, logger)
 
     # Mode: CONNECT only
     # Requirement: Không có DataReader cục bộ. Chỉ báo OK khi thấy participant khác chính mình.

@@ -1,0 +1,14 @@
+{
+  "interval": 2,
+  "count": 5,
+  "device_ids": [
+    "tcp_dev_01",
+    "tcp_dev_02"
+  ],
+  "attributes": [
+    { "fieldName": "flow_rate", "type": "double", "value": null, "min": 0.0, "max": 100.0 },
+    { "fieldName": "valve_open", "type": "string", "value": ["true", "false"], "min": null, "max": null },
+    { "fieldName": "pressure_bar", "type": "double", "value": null, "min": 1.0, "max": 10.0 }
+  ]
+}
+
